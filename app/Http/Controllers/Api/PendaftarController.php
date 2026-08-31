@@ -59,8 +59,23 @@ class PendaftarController extends Controller
         $validated['biaya_pelatihan'] = $validated['biaya_pelatihan'] ?? 0;
         $validated['tanggal_daftar']  = now();
 
+        // Cari angkatan yang statusnya 'Pendaftaran' (Pendaftaran Buka) untuk program ini
+        // (Jika Angkatan 50 sedang 'On_Going', maka pendaftar baru tidak akan masuk Angkatan 50, melainkan masuk Angkatan 51 / Pendaftaran Buka)
+        $angkatanOpen = null;
+        if (!empty($validated['program_id'])) {
+            $angkatanOpen = \App\Models\Angkatan::where('program_id', $validated['program_id'])
+                ->where('status', 'Pendaftaran')
+                ->first();
+        }
+        if (!$angkatanOpen) {
+            $angkatanOpen = \App\Models\Angkatan::where('status', 'Pendaftaran')->first();
+        }
+        if ($angkatanOpen) {
+            $validated['angkatan_id'] = $angkatanOpen->id;
+        }
+
         $pendaftar = Pendaftar::create($validated);
-        return response()->json(['success' => true, 'message' => 'Pendaftaran berhasil dikirim.', 'data' => $pendaftar], 201);
+        return response()->json(['success' => true, 'message' => 'Pendaftaran berhasil dikirim.', 'data' => $pendaftar->load('angkatan')], 201);
     }
 
     public function show(string $id)

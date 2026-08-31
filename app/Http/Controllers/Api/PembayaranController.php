@@ -27,11 +27,15 @@ class PembayaranController extends Controller
     public function uploadBukti(Request $request, string $pendaftarId)
     {
         $request->validate([
-            'bukti'             => 'required|file|mimes:jpg,jpeg,png,pdf|max:5120',
+            'bukti_pembayaran'  => 'required_without:bukti|file|mimes:jpg,jpeg,png,pdf|max:5120',
+            'bukti'             => 'required_without:bukti_pembayaran|file|mimes:jpg,jpeg,png,pdf|max:5120',
             'metode_pembayaran' => 'required|string',
         ]);
+
         $pendaftar = Pendaftar::findOrFail($pendaftarId);
-        $path = $request->file('bukti')->store('bukti/pembayaran', 'public');
+        $uploadedFile = $request->file('bukti_pembayaran') ?? $request->file('bukti');
+        $path = $uploadedFile->store('bukti/pembayaran', 'public');
+
         $pendaftar->update([
             'bukti_pembayaran'  => $path,
             'metode_pembayaran' => $request->metode_pembayaran,

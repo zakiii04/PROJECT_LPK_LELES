@@ -39,6 +39,7 @@ return new class extends Migration
             $table->string('jenis_pelatihan');
             $table->string('program_id')->nullable();
             $table->foreign('program_id')->references('id')->on('program_pelatihans')->onDelete('set null');
+            $table->string('tempat_pelatihan')->nullable();
             $table->text('motivasi');
 
             // Alokasi Angkatan

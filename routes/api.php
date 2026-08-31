@@ -18,6 +18,7 @@ use App\Http\Controllers\Api\KelulusanController;
 use App\Http\Controllers\Api\SertifikatController;
 use App\Http\Controllers\Api\DashboardController;
 use App\Http\Controllers\Api\UploadController;
+use App\Http\Controllers\Api\PaymentMethodController;
 
 /*
 |--------------------------------------------------------------------------
@@ -210,6 +211,32 @@ Route::prefix('v1')->group(function () {
             });
         });
 
+
+        // ----------------------------------------------------------
+        // 8b. TEMPAT PELATIHAN
+        // ----------------------------------------------------------
+        Route::prefix('tempat')->group(function () {
+            Route::get('/', [\App\Http\Controllers\Api\TempatPelatihanController::class, 'index']);
+            Route::get('/{id}', [\App\Http\Controllers\Api\TempatPelatihanController::class, 'show']);
+            Route::middleware('role:ADMIN,HRD')->group(function () {
+                Route::post('/', [\App\Http\Controllers\Api\TempatPelatihanController::class, 'store']);
+                Route::put('/{id}', [\App\Http\Controllers\Api\TempatPelatihanController::class, 'update']);
+                Route::delete('/{id}', [\App\Http\Controllers\Api\TempatPelatihanController::class, 'destroy']);
+            });
+        });
+
+        // ----------------------------------------------------------
+        // 8c. METODE PEMBAYARAN
+        // ----------------------------------------------------------
+        Route::middleware('role:ADMIN')->prefix('payment-methods')->group(function () {
+            Route::get('/', [PaymentMethodController::class, 'index']);
+            Route::post('/', [PaymentMethodController::class, 'store']);
+            Route::put('/{id}', [PaymentMethodController::class, 'update']);
+            Route::delete('/{id}', [PaymentMethodController::class, 'destroy']);
+        });
+
+        // Public method list for peserta
+        Route::get('payment-methods', [PaymentMethodController::class, 'index']);
 
         // ----------------------------------------------------------
         // 9. KEHADIRAN / PRESENSI

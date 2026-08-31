@@ -11,7 +11,7 @@ class AngkatanController extends Controller
 {
     public function index(Request $request)
     {
-        $query = Angkatan::with('program')->withCount('pendaftar');
+        $query = Angkatan::with(['program', 'pendaftar'])->withCount('pendaftar');
         if ($request->status)     $query->where('status', $request->status);
         if ($request->program_id) $query->where('program_id', $request->program_id);
         if ($request->tahun)      $query->where('tahun', $request->tahun);
@@ -38,30 +38,52 @@ class AngkatanController extends Controller
             'kuota'                   => 'sometimes|integer|min:1',
             'instruktur_nama'         => 'required|string',
             'status'                  => 'sometimes|in:Pendaftaran,On_Going,Selesai,Mendatang',
-            'program_id'              => 'required|exists:program_pelatihans,id',
+            'program_id'              => 'required|string',
         ]);
+
+        if (!empty($validated['program_id'])) {
+            $prog = \App\Models\ProgramPelatihan::where('id', $validated['program_id'])
+                ->orWhere('nama', 'like', '%' . $validated['program_id'] . '%')
+                ->first();
+            if ($prog) {
+                $validated['program_id'] = $prog->id;
+            }
+        }
+
         $validated['id'] = Str::uuid()->toString();
         $angkatan = Angkatan::create($validated);
-        return response()->json(['success' => true, 'message' => 'Angkatan berhasil dibuat.', 'data' => $angkatan], 201);
+        return response()->json(['success' => true, 'message' => 'Angkatan berhasil dibuat.', 'data' => $angkatan->load(['program', 'pendaftar'])], 201);
     }
 
     public function update(Request $request, string $id)
     {
         $angkatan = Angkatan::findOrFail($id);
         $validated = $request->validate([
-            'kode_angkatan'   => 'sometimes|string|unique:angkatans,kode_angkatan,' . $id,
-            'nama_angkatan'   => 'sometimes|string',
-            'tahun'           => 'sometimes|integer',
-            'periode'         => 'sometimes|string',
-            'tanggal_mulai'   => 'sometimes|date',
-            'tanggal_selesai' => 'sometimes|date',
-            'kuota'           => 'sometimes|integer|min:1',
-            'instruktur_nama' => 'sometimes|string',
-            'status'          => 'sometimes|in:Pendaftaran,On_Going,Selesai,Mendatang',
-            'program_id'      => 'sometimes|exists:program_pelatihans,id',
+            'kode_angkatan'           => 'sometimes|string|unique:angkatans,kode_angkatan,' . $id,
+            'nama_angkatan'           => 'sometimes|string',
+            'tahun'                   => 'sometimes|integer',
+            'periode'                 => 'sometimes|string',
+            'tgl_mulai_pendaftaran'   => 'nullable|date',
+            'tgl_selesai_pendaftaran' => 'nullable|date',
+            'tanggal_mulai'           => 'sometimes|date',
+            'tanggal_selesai'         => 'sometimes|date',
+            'kuota'                   => 'sometimes|integer|min:1',
+            'instruktur_nama'         => 'sometimes|string',
+            'status'                  => 'sometimes|in:Pendaftaran,On_Going,Selesai,Mendatang',
+            'program_id'              => 'sometimes|nullable|string',
         ]);
+
+        if (!empty($validated['program_id'])) {
+            $prog = \App\Models\ProgramPelatihan::where('id', $validated['program_id'])
+                ->orWhere('nama', 'like', '%' . $validated['program_id'] . '%')
+                ->first();
+            if ($prog) {
+                $validated['program_id'] = $prog->id;
+            }
+        }
+
         $angkatan->update($validated);
-        return response()->json(['success' => true, 'message' => 'Angkatan berhasil diupdate.', 'data' => $angkatan]);
+        return response()->json(['success' => true, 'message' => 'Angkatan berhasil diupdate.', 'data' => $angkatan->load(['program', 'pendaftar'])]);
     }
 
     public function updateStatus(Request $request, string $id)

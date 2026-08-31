@@ -14,12 +14,21 @@ class JadwalPelatihan extends Model
         'id',
         'judul',
         'jenis_pelatihan',
+        'angkatan_id',
+        'hari_ke',
         'tanggal',
         'jam',
         'ruangan',
+        'tempat_pelatihan',
+        'pengajar',
         'jenis_sesi',
         'status',
     ];
+
+    public function angkatan()
+    {
+        return $this->belongsTo(Angkatan::class, 'angkatan_id');
+    }
 
     public function peserta()
     {

@@ -32,7 +32,7 @@ class UjianController extends Controller
             'program_id'         => 'required|string',
             'jawaban'            => 'required|array|min:1',
             'jawaban.*.soal_id'  => 'required|exists:soal_ujians,id',
-            'jawaban.*.jawaban'  => 'required|integer|min:0|max:3',
+            'jawaban.*.jawaban'  => 'required|integer|min:-1|max:4',
         ]);
 
         $pendaftar = $request->user()->pendaftar;

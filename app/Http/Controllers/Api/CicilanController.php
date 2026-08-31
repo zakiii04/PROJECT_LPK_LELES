@@ -40,11 +40,13 @@ class CicilanController extends Controller
     public function uploadBukti(Request $request, string $id)
     {
         $request->validate([
-            'bukti'             => 'required|file|mimes:jpg,jpeg,png,pdf|max:5120',
+            'bukti_pembayaran'  => 'required_without:bukti|file|mimes:jpg,jpeg,png,pdf|max:5120',
+            'bukti'             => 'required_without:bukti_pembayaran|file|mimes:jpg,jpeg,png,pdf|max:5120',
             'metode_pembayaran' => 'required|string',
         ]);
         $cicilan = Cicilan::findOrFail($id);
-        $path = $request->file('bukti')->store('bukti/cicilan', 'public');
+        $uploadedFile = $request->file('bukti_pembayaran') ?? $request->file('bukti');
+        $path = $uploadedFile->store('bukti/cicilan', 'public');
         $cicilan->update([
             'bukti_pembayaran'  => $path,
             'metode_pembayaran' => $request->metode_pembayaran,

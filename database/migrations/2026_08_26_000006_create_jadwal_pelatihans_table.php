@@ -12,9 +12,14 @@ return new class extends Migration
             $table->uuid('id')->primary();
             $table->string('judul');
             $table->string('jenis_pelatihan');
+            $table->uuid('angkatan_id')->nullable();
+            $table->foreign('angkatan_id')->references('id')->on('angkatans')->onDelete('cascade');
+            $table->integer('hari_ke')->nullable();
             $table->string('tanggal');
             $table->string('jam');
             $table->string('ruangan');
+            $table->string('tempat_pelatihan')->nullable();
+            $table->string('pengajar')->nullable();
             $table->enum('jenis_sesi', ['Orientasi', 'Teori', 'Praktik', 'Ujian'])->default('Teori');
             $table->string('status')->default('Reguler');
             $table->timestamps(); // created_at

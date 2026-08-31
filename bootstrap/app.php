@@ -17,6 +17,10 @@ return Application::configure(basePath: dirname(__DIR__))
         // CORS — harus paling awal agar preflight OPTIONS ditangani
         $middleware->prepend(\Illuminate\Http\Middleware\HandleCors::class);
 
+        $middleware->web(append: [
+            \App\Http\Middleware\HandleInertiaRequests::class,
+        ]);
+
         $middleware->alias([
             'role' => \App\Http\Middleware\RoleMiddleware::class,
         ]);

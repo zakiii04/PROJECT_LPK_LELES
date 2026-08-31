@@ -33,6 +33,7 @@ class Pendaftar extends Model
         'hubungan_kontak_darurat',
         'jenis_pelatihan',
         'program_id',
+        'tempat_pelatihan',
         'motivasi',
         'angkatan_id',
         'user_id',
