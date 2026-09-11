@@ -11,8 +11,12 @@ const methodTypeLabels: Record<PaymentMethodType, string> = {
   lainnya: 'Lainnya',
 };
 
-export default function PaymentMethodManager() {
-  const [methods, setMethods] = useState<PaymentMethod[]>([]);
+interface PaymentMethodManagerProps {
+  initialPaymentMethods?: PaymentMethod[];
+}
+
+export default function PaymentMethodManager({ initialPaymentMethods = [] }: PaymentMethodManagerProps) {
+  const [methods, setMethods] = useState<PaymentMethod[]>(initialPaymentMethods);
   const [showModal, setShowModal] = useState(false);
   const [editingMethod, setEditingMethod] = useState<PaymentMethod | null>(null);
   const [pendingDelete, setPendingDelete] = useState<{ id: string; name: string } | null>(null);
@@ -35,8 +39,13 @@ export default function PaymentMethodManager() {
   }, []);
 
   useEffect(() => {
-    loadData();
-  }, [loadData]);
+    if (initialPaymentMethods.length > 0) {
+      const sorted = [...initialPaymentMethods].sort((a, b) => (a.urutan ?? 0) - (b.urutan ?? 0));
+      setMethods(sorted);
+    } else {
+      loadData();
+    }
+  }, [initialPaymentMethods]);
 
   const openAddModal = () => {
     setEditingMethod(null);

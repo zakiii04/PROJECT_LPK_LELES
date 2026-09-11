@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { pendaftarApi, kehadiranApi } from '@/lib/api';
 import type { Pendaftar, Kehadiran, StatusKehadiran } from '@/lib/types';
+import Pagination from '@/Components/Pagination';
 
 interface AttendanceTrackerProps {
   programNama: string;
@@ -16,6 +17,8 @@ export default function AttendanceTracker({ programNama }: AttendanceTrackerProp
   >({});
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const pageSize = 10;
 
   const loadData = useCallback(async () => {
     setIsLoading(true);
@@ -28,6 +31,7 @@ export default function AttendanceTracker({ programNama }: AttendanceTrackerProp
           (programNama === 'Semua' || p.jenis_pelatihan === programNama)
       );
       setPendaftarList(filtered);
+      setCurrentPage(1);
 
       const kRes = await kehadiranApi.list({ tanggal });
       const allKehadiran = kRes.data || [];
@@ -153,7 +157,7 @@ export default function AttendanceTracker({ programNama }: AttendanceTrackerProp
                 </td>
               </tr>
             ) : (
-              pendaftarList.map((p) => {
+              pendaftarList.slice((currentPage - 1) * pageSize, currentPage * pageSize).map((p) => {
                 const current = attendanceState[p.id] || { status: 'Hadir', catatan: '' };
 
                 return (
@@ -205,6 +209,12 @@ export default function AttendanceTracker({ programNama }: AttendanceTrackerProp
             )}
           </tbody>
         </table>
+        <Pagination
+          currentPage={currentPage}
+          totalItems={pendaftarList.length}
+          pageSize={pageSize}
+          onPageChange={setCurrentPage}
+        />
       </div>
     </div>
   );

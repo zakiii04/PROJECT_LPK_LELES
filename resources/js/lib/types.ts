@@ -150,17 +150,14 @@ export interface Pendaftar {
   nik: string;
   tempat_lahir: string;
   tanggal_lahir: string;
-  jenis_kelamin: 'Laki-laki' | 'Perempuan';
   alamat: string;
   tinggi_badan: string;
   berat_badan: string;
   lingkar_pinggang: string;
   riwayat_penyakit: string | null;
+  berkas_verifikasi?: string[] | null;
   no_hp: string;
   email: string;
-  nama_kontak_darurat: string;
-  no_hp_kontak_darurat: string;
-  hubungan_kontak_darurat: string;
   jenis_pelatihan: string;
   program_id: string | null;
   tempat_pelatihan?: string | null;
@@ -186,7 +183,6 @@ export interface CreatePendaftarPayload {
   nik: string;
   tempat_lahir: string;
   tanggal_lahir: string;
-  jenis_kelamin: 'Laki-laki' | 'Perempuan';
   alamat: string;
   tinggi_badan: string;
   berat_badan: string;
@@ -194,9 +190,6 @@ export interface CreatePendaftarPayload {
   riwayat_penyakit?: string;
   no_hp: string;
   email: string;
-  nama_kontak_darurat: string;
-  no_hp_kontak_darurat: string;
-  hubungan_kontak_darurat: string;
   jenis_pelatihan: string;
   program_id?: string;
   motivasi: string;
@@ -364,6 +357,7 @@ export interface SoalUjian {
   opsi: string[];
   jawaban_benar: number;
   program_id: string | null;
+  gambar_soal?: string | null;
 }
 
 export interface CreateSoalPayload {
@@ -373,6 +367,7 @@ export interface CreateSoalPayload {
   opsi: string[];
   jawaban_benar: number;
   program_id?: string;
+  gambar_soal?: File | string | null;
 }
 
 // --- Hasil Ujian ---
@@ -399,6 +394,7 @@ export interface SubmitUjianPayload {
   tipe: TipeUjian;
   program_id: string;
   jawaban: { soal_id: string; jawaban: number }[];
+  pendaftar_id?: string;
 }
 
 // --- Kelulusan ---
@@ -477,7 +473,7 @@ export interface PendaftarFormData {
   nik: string;
   tempat_lahir: string;
   tanggal_lahir: string;
-  jenis_kelamin: 'Laki-laki' | 'Perempuan';
+  alamat_lengkap: string;
   provinsi?: string;
   kabupaten_kota?: string;
   kecamatan?: string;
@@ -490,9 +486,6 @@ export interface PendaftarFormData {
   riwayat_penyakit?: string;
   no_hp: string;
   email: string;
-  nama_kontak_darurat: string;
-  no_hp_kontak_darurat: string;
-  hubungan_kontak_darurat: string;
   jenis_pelatihan: string;
   program_id?: string;
   tempat_pelatihan?: string;
@@ -517,3 +510,67 @@ export interface CreateTempatPayload {
   fasilitas: string;
   status?: 'Aktif' | 'Nonaktif';
 }
+
+// --- Mata Pelajaran ---
+
+export interface MataPelajaran {
+  id: string;
+  kode: string;
+  nama: string;
+  deskripsi?: string | null;
+  program_id?: string | null;
+  urutan: number;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface CreateMataPelajaranPayload {
+  kode: string;
+  nama: string;
+  deskripsi?: string;
+  program_id?: string;
+  urutan?: number;
+}
+
+// --- Nilai ---
+
+export type TipeNilai = 'mata_pelajaran' | 'pretest' | 'posttest' | 'kehadiran';
+
+export interface Nilai {
+  id: string;
+  pendaftar_id: string;
+  mata_pelajaran_id?: string | null;
+  tipe_nilai: TipeNilai;
+  nilai: number;
+  catatan?: string | null;
+  tanggal?: string | null;
+  created_at?: string;
+  updated_at?: string;
+  mata_pelajaran?: MataPelajaran;
+}
+
+export interface CreateNilaiPayload {
+  pendaftar_id: string;
+  mata_pelajaran_id?: string;
+  tipe_nilai: TipeNilai;
+  nilai: number;
+  catatan?: string;
+  tanggal?: string;
+}
+
+// --- Absensi (data for printable attendance sheet) ---
+
+export interface AbsensiKehadiran {
+  total: number;
+  hadir: number;
+  persen: number;
+}
+
+export interface AbsensiData {
+  peserta: Pendaftar[];
+  nilai: Nilai[];
+  hasil_posttest: Record<string, HasilUjian>;
+  hasil_pretest: Record<string, HasilUjian>;
+  kehadiran: Record<string, AbsensiKehadiran>;
+}
+

@@ -47,6 +47,7 @@ export default function ExamInterface({
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [showExitModal, setShowExitModal] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [zoomImage, setZoomImage] = useState<string | null>(null);
 
   // Sync / Persist progress to LocalStorage
   const saveProgressToStorage = (
@@ -165,6 +166,7 @@ export default function ExamInterface({
         tipe,
         program_id: (pendaftar.program_id || pendaftar.jenis_pelatihan || 'program-default') as string,
         jawaban: jawabanPayload,
+        pendaftar_id: pendaftar.id,
       });
     } catch (err) {
       console.error('Submit error:', err);
@@ -182,13 +184,13 @@ export default function ExamInterface({
 
   if (!currentSoal) {
     return (
-      <div className="min-h-screen bg-slate-900 text-slate-100 flex items-center justify-center p-6 font-sans">
-        <div className="bg-slate-800 border border-slate-700 rounded-3xl p-8 max-w-md text-center space-y-4">
-          <div className="w-16 h-16 rounded-full bg-amber-500/20 text-amber-400 flex items-center justify-center text-2xl mx-auto font-bold">
+      <div className="min-h-screen bg-slate-100 text-slate-800 flex items-center justify-center p-6 font-sans">
+        <div className="bg-white border border-slate-200 shadow-xl rounded-3xl p-8 max-w-md text-center space-y-4">
+          <div className="w-16 h-16 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center text-2xl mx-auto font-bold">
             ⚠️
           </div>
-          <h2 className="text-xl font-bold text-white">Soal Ujian Belum Tersedia</h2>
-          <p className="text-xs text-slate-400 leading-relaxed">
+          <h2 className="text-xl font-bold text-slate-900">Soal Ujian Belum Tersedia</h2>
+          <p className="text-xs text-slate-500 leading-relaxed">
             Tidak ada soal ujian {tipe.toUpperCase()} yang terdaftar untuk modul {pendaftar.jenis_pelatihan}. Silakan hubungi instruktur/admin LPK.
           </p>
           <button
@@ -196,7 +198,7 @@ export default function ExamInterface({
               clearExamStorage();
               onCancel();
             }}
-            className="w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs shadow-lg transition-all"
+            className="w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-md transition-all cursor-pointer"
           >
             Kembali ke Dashboard
           </button>
@@ -210,37 +212,37 @@ export default function ExamInterface({
   const unansweredCount = soalList.length - answeredCount;
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-between p-3 md:p-6 font-sans">
+    <div className="min-h-screen bg-[#f8fafc] text-slate-800 flex flex-col justify-between p-3 md:p-6 font-sans">
       {/* Top Header Bar with Timer & Status */}
-      <header className="max-w-6xl w-full mx-auto bg-slate-900/90 border border-slate-800 rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-xl backdrop-blur">
+      <header className="max-w-6xl w-full mx-auto bg-white border border-slate-200/90 rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-xs">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-indigo-600/30 border border-indigo-500/40 text-indigo-400 flex items-center justify-center font-bold font-mono text-base flex-shrink-0">
+          <div className="w-10 h-10 rounded-xl bg-indigo-600 text-white flex items-center justify-center font-bold font-mono text-sm flex-shrink-0 shadow-xs">
             CBT
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <span className="px-2 py-0.5 rounded text-[10px] font-extrabold uppercase bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+              <span className="px-2.5 py-0.5 rounded text-[10px] font-extrabold uppercase bg-indigo-50 text-indigo-700 border border-indigo-200">
                 UJIAN LMS — {tipe.toUpperCase()}
               </span>
-              <span className="text-xs text-slate-400 font-mono hidden sm:inline">{pendaftar.jenis_pelatihan}</span>
+              <span className="text-xs text-slate-500 font-mono hidden sm:inline">{pendaftar.jenis_pelatihan}</span>
             </div>
-            <h2 className="text-sm md:text-base font-bold text-white mt-0.5 flex items-center gap-2">
+            <h2 className="text-sm md:text-base font-bold text-slate-900 mt-0.5 flex items-center gap-2">
               <span>{pendaftar.nama_lengkap}</span>
-              <span className="text-xs text-slate-400 font-mono font-normal">({pendaftar.no_pendaftaran})</span>
+              <span className="text-xs text-slate-500 font-mono font-normal">({pendaftar.no_pendaftaran})</span>
             </h2>
           </div>
         </div>
 
         {/* Timer Countdown & Actions */}
         <div className="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-end">
-          <div className="flex items-center gap-3 bg-slate-950 border border-slate-800 px-4 py-2 rounded-xl">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`${timeLeft < 180 ? 'text-rose-400 animate-pulse' : 'text-amber-400'}`}>
+          <div className="flex items-center gap-3 bg-slate-50 border border-slate-200 px-4 py-2 rounded-xl shadow-2xs">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`${timeLeft < 180 ? 'text-rose-500 animate-pulse' : 'text-amber-500'}`}>
               <circle cx="12" cy="12" r="10" />
               <polyline points="12 6 12 12 16 14" />
             </svg>
             <div>
-              <div className="text-[9px] uppercase tracking-wider text-slate-400 font-bold">Sisa Waktu Ujian</div>
-              <div className={`text-xl font-black font-mono leading-none ${timeLeft < 180 ? 'text-rose-400 animate-bounce' : 'text-amber-300'}`}>
+              <div className="text-[9px] uppercase tracking-wider text-slate-500 font-bold">Sisa Waktu Ujian</div>
+              <div className={`text-xl font-black font-mono leading-none ${timeLeft < 180 ? 'text-rose-600 animate-bounce' : 'text-slate-900'}`}>
                 {timeFormatted}
               </div>
             </div>
@@ -248,7 +250,7 @@ export default function ExamInterface({
 
           <button
             onClick={() => setShowExitModal(true)}
-            className="px-3.5 py-2 rounded-xl border border-slate-700/80 bg-slate-900 text-xs text-slate-400 hover:text-white hover:border-slate-600 transition-all"
+            className="px-3.5 py-2 rounded-xl border border-slate-300 bg-white text-xs font-semibold text-slate-600 hover:text-slate-900 hover:bg-slate-50 hover:border-slate-400 transition-all cursor-pointer"
           >
             Keluar
           </button>
@@ -258,16 +260,16 @@ export default function ExamInterface({
       {/* Main Examination Body */}
       <main className="max-w-6xl w-full mx-auto my-4 md:my-6 grid grid-cols-1 lg:grid-cols-4 gap-5 flex-1">
         {/* Question Area (3 Cols) */}
-        <div className="lg:col-span-3 bg-slate-900/80 border border-slate-800 rounded-2xl p-5 md:p-8 flex flex-col justify-between space-y-6 shadow-xl backdrop-blur">
+        <div className="lg:col-span-3 bg-white border border-slate-200/90 rounded-2xl p-5 md:p-8 flex flex-col justify-between space-y-6 shadow-xs">
           <div className="space-y-6">
             {/* Question Header Bar */}
-            <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-4">
               <div className="flex items-center gap-2">
-                <span className="px-3 py-1 rounded-xl bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 text-xs font-bold font-mono">
+                <span className="px-3 py-1 rounded-xl bg-indigo-50 text-indigo-700 border border-indigo-200 text-xs font-bold font-mono">
                   Soal Nomor {currentIdx + 1} / {soalList.length}
                 </span>
                 {raguRagu[currentIdx] && (
-                  <span className="px-2.5 py-0.5 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[10px] font-bold uppercase tracking-wider animate-pulse">
+                  <span className="px-2.5 py-0.5 rounded-lg bg-amber-50 text-amber-800 border border-amber-300 text-[10px] font-bold uppercase tracking-wider animate-pulse">
                     ⚠️ Ditandai Ragu
                   </span>
                 )}
@@ -277,10 +279,10 @@ export default function ExamInterface({
               <button
                 type="button"
                 onClick={handleToggleRagu}
-                className={`text-xs font-bold px-3.5 py-2 rounded-xl border transition-all flex items-center gap-2 ${
+                className={`text-xs font-bold px-3.5 py-2 rounded-xl border transition-all flex items-center gap-2 cursor-pointer ${
                   raguRagu[currentIdx]
-                    ? 'bg-amber-500 text-slate-950 border-amber-400 font-extrabold shadow-lg shadow-amber-500/20'
-                    : 'bg-slate-800/80 text-slate-300 border-slate-700 hover:bg-amber-500/20 hover:text-amber-300 hover:border-amber-500/50'
+                    ? 'bg-amber-500 text-white border-amber-600 font-extrabold shadow-xs'
+                    : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-amber-50 hover:text-amber-800 hover:border-amber-300'
                 }`}
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill={raguRagu[currentIdx] ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -292,10 +294,32 @@ export default function ExamInterface({
             </div>
 
             {/* Question Text */}
-            <div className="space-y-2">
-              <h3 className="text-base md:text-xl font-bold text-white leading-relaxed">
+            <div className="space-y-3">
+              <h3 className="text-base md:text-xl font-bold text-slate-900 leading-relaxed">
                 {currentSoal.pertanyaan}
               </h3>
+
+              {/* Question Image — displayed below text if present */}
+              {currentSoal.gambar_soal && (
+                <div className="mt-3">
+                  <div
+                    className="relative inline-block group cursor-zoom-in"
+                    onClick={() => setZoomImage(currentSoal.gambar_soal!)}
+                    title="Klik untuk perbesar gambar"
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={currentSoal.gambar_soal}
+                      alt="Gambar Soal"
+                      className="max-h-56 max-w-full rounded-xl border border-slate-200 shadow-sm object-contain bg-slate-50 p-1.5 transition-all group-hover:ring-2 group-hover:ring-indigo-400"
+                    />
+                    <div className="absolute top-2 right-2 bg-slate-900/80 text-white text-[10px] px-2 py-0.5 rounded-full opacity-0 group-hover:opacity-100 transition-all pointer-events-none flex items-center gap-1">
+                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+                      Perbesar
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Multiple Choice Options */}
@@ -309,17 +333,17 @@ export default function ExamInterface({
                     key={oIdx}
                     type="button"
                     onClick={() => handleSelectOption(oIdx)}
-                    className={`w-full text-left p-4 md:p-5 rounded-2xl border flex items-center gap-4 transition-all ${
+                    className={`w-full text-left p-4 md:p-5 rounded-2xl border flex items-center gap-4 transition-all cursor-pointer ${
                       isSelected
-                        ? 'bg-indigo-600/30 border-indigo-500 text-white shadow-xl ring-2 ring-indigo-500/40'
-                        : 'bg-slate-950/60 border-slate-800/90 text-slate-300 hover:bg-slate-800/60 hover:border-slate-700'
+                        ? 'bg-indigo-50/80 border-2 border-indigo-600 text-indigo-950 font-bold shadow-xs ring-2 ring-indigo-200/50'
+                        : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50 hover:border-indigo-300 shadow-2xs'
                     }`}
                   >
                     <div
                       className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold text-sm flex-shrink-0 font-mono transition-all ${
                         isSelected
-                          ? 'bg-indigo-600 text-white shadow-md'
-                          : 'bg-slate-800 text-slate-400 border border-slate-700'
+                          ? 'bg-indigo-600 text-white shadow-xs'
+                          : 'bg-slate-100 text-slate-600 border border-slate-200'
                       }`}
                     >
                       {optionChar}
@@ -332,12 +356,12 @@ export default function ExamInterface({
           </div>
 
           {/* Navigation Bottom Buttons */}
-          <div className="flex items-center justify-between pt-6 border-t border-slate-800 flex-wrap gap-3">
+          <div className="flex items-center justify-between pt-6 border-t border-slate-100 flex-wrap gap-3">
             <button
               type="button"
               onClick={() => handleJumpQuestion(Math.max(0, currentIdx - 1))}
               disabled={currentIdx === 0}
-              className="px-5 py-2.5 rounded-xl border border-slate-700/80 bg-slate-800 text-xs font-bold text-slate-300 hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5 transition-all"
+              className="px-5 py-2.5 rounded-xl border border-slate-200 bg-white text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5 transition-all shadow-2xs cursor-pointer"
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <polyline points="15 18 9 12 15 6" />
@@ -350,7 +374,7 @@ export default function ExamInterface({
                 <button
                   type="button"
                   onClick={() => handleJumpQuestion(Math.min(soalList.length - 1, currentIdx + 1))}
-                  className="px-6 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-xs font-bold text-white shadow-lg transition-all flex items-center gap-1.5"
+                  className="px-6 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-xs font-bold text-white shadow-xs transition-all flex items-center gap-1.5 cursor-pointer"
                 >
                   <span>Soal Berikutnya</span>
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -361,7 +385,7 @@ export default function ExamInterface({
                 <button
                   type="button"
                   onClick={() => setShowConfirmModal(true)}
-                  className="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-xs font-extrabold text-white shadow-lg transition-all flex items-center gap-2"
+                  className="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-xs font-extrabold text-white shadow-xs transition-all flex items-center gap-2 cursor-pointer"
                 >
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                     <polyline points="20 6 9 17 4 12" />
@@ -373,34 +397,34 @@ export default function ExamInterface({
           </div>
         </div>
 
-        {/* Palette Soal Sidebar (1 Col - Pindah-pindah Soal) */}
-        <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-5 flex flex-col justify-between space-y-4 shadow-xl backdrop-blur">
+        {/* Palette Soal Sidebar (1 Col - Navigasi Rapi Nomor Soal) */}
+        <div className="bg-white border border-slate-200/90 rounded-2xl p-5 flex flex-col justify-between space-y-4 shadow-xs">
           <div>
-            <div className="flex items-center justify-between mb-3 border-b border-slate-800 pb-2">
-              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">
+            <div className="flex items-center justify-between mb-3 border-b border-slate-100 pb-2.5">
+              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500">
                 Navigasi Nomor Soal
               </h4>
-              <span className="text-[11px] font-mono font-bold text-indigo-400">
+              <span className="text-[11px] font-mono font-bold text-indigo-600">
                 {answeredCount}/{soalList.length} Dijawab
               </span>
             </div>
 
-            {/* Grid Palette buttons (Pindah-Pindah Soal) */}
-            <div className="grid grid-cols-4 gap-2 max-h-[320px] overflow-y-auto pr-1">
+            {/* Grid Palette buttons (Pindah-Pindah Soal - Rapi, grid 5 kolom, tanpa offset yang keluar) */}
+            <div className="grid grid-cols-5 gap-2 p-1 max-h-[320px] overflow-y-auto">
               {soalList.map((_, idx) => {
                 const isAnswered = userAnswers[idx] !== undefined;
                 const isCurrent = currentIdx === idx;
                 const isRagu = raguRagu[idx];
 
-                let bgClass = 'bg-slate-950/80 text-slate-400 border-slate-800 hover:bg-slate-800';
+                let btnStyle = 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100 hover:border-slate-300';
                 if (isRagu) {
-                  bgClass = 'bg-amber-500/25 text-amber-300 border-amber-500/50 font-bold';
+                  btnStyle = 'bg-amber-50 text-amber-800 border-amber-300 font-bold hover:bg-amber-100';
                 } else if (isAnswered) {
-                  bgClass = 'bg-emerald-600/25 text-emerald-300 border-emerald-500/50 font-bold';
+                  btnStyle = 'bg-emerald-50 text-emerald-700 border-emerald-300 font-bold hover:bg-emerald-100';
                 }
 
                 if (isCurrent) {
-                  bgClass += ' ring-2 ring-indigo-400 ring-offset-2 ring-offset-slate-900 font-extrabold text-white';
+                  btnStyle = 'border-2 border-indigo-600 bg-indigo-100 text-indigo-900 font-black shadow-xs ring-2 ring-indigo-300/60';
                 }
 
                 return (
@@ -408,12 +432,12 @@ export default function ExamInterface({
                     key={idx}
                     type="button"
                     onClick={() => handleJumpQuestion(idx)}
-                    className={`h-10 rounded-xl border text-xs flex items-center justify-center font-mono transition-all relative ${bgClass}`}
+                    className={`aspect-square h-10 w-full rounded-xl border text-xs flex items-center justify-center font-mono transition-all relative cursor-pointer ${btnStyle}`}
                     title={`Lompat ke Soal Nomor ${idx + 1}`}
                   >
-                    {idx + 1}
+                    <span>{idx + 1}</span>
                     {isRagu && (
-                      <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-amber-400 rounded-full border border-slate-900" />
+                      <span className="absolute top-1 right-1 w-2 h-2 bg-amber-500 rounded-full" />
                     )}
                   </button>
                 );
@@ -422,33 +446,33 @@ export default function ExamInterface({
           </div>
 
           {/* Palette Status Legend */}
-          <div className="space-y-2 text-[10px] text-slate-400 border-t border-slate-800 pt-4">
+          <div className="space-y-2 text-[11px] text-slate-600 border-t border-slate-100 pt-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <span className="w-3 h-3 rounded bg-emerald-500/30 border border-emerald-500/60" />
+                <span className="w-3 h-3 rounded-md bg-emerald-500" />
                 <span>Sudah Dijawab</span>
               </div>
-              <span className="font-mono font-bold text-emerald-400">{answeredCount}</span>
+              <span className="font-mono font-bold text-emerald-600">{answeredCount}</span>
             </div>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <span className="w-3 h-3 rounded bg-amber-500/30 border border-amber-500/60" />
+                <span className="w-3 h-3 rounded-md bg-amber-500" />
                 <span>Ragu-ragu</span>
               </div>
-              <span className="font-mono font-bold text-amber-400">{raguCount}</span>
+              <span className="font-mono font-bold text-amber-600">{raguCount}</span>
             </div>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <span className="w-3 h-3 rounded bg-slate-950 border border-slate-800" />
+                <span className="w-3 h-3 rounded-md bg-slate-200 border border-slate-300" />
                 <span>Belum Dijawab</span>
               </div>
-              <span className="font-mono font-bold text-slate-400">{unansweredCount}</span>
+              <span className="font-mono font-bold text-slate-500">{unansweredCount}</span>
             </div>
 
             <button
               type="button"
               onClick={() => setShowConfirmModal(true)}
-              className="w-full mt-4 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs shadow-lg transition-all flex items-center justify-center gap-2"
+              className="w-full mt-4 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs shadow-xs transition-all flex items-center justify-center gap-2 cursor-pointer"
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                 <polyline points="20 6 9 17 4 12" />
@@ -461,54 +485,54 @@ export default function ExamInterface({
 
       {/* Confirmation Modal before Submit */}
       {showConfirmModal && (
-        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="max-w-md w-full p-6 bg-slate-900 text-slate-100 border border-slate-800 rounded-3xl shadow-2xl space-y-4 animate-scale-in">
-            <div className="w-12 h-12 rounded-2xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold text-xl mx-auto">
+        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="max-w-md w-full p-6 bg-white text-slate-800 border border-slate-200 shadow-2xl rounded-3xl space-y-4 animate-scale-in">
+            <div className="w-12 h-12 rounded-2xl bg-emerald-100 text-emerald-600 flex items-center justify-center font-bold text-xl mx-auto">
               <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                 <polyline points="20 6 9 17 4 12" />
               </svg>
             </div>
 
             <div className="text-center">
-              <h3 className="text-lg font-bold text-white">Konfirmasi Pengiriman Ujian</h3>
-              <p className="text-xs text-slate-400 mt-1">
+              <h3 className="text-lg font-bold text-slate-900">Konfirmasi Pengiriman Ujian</h3>
+              <p className="text-xs text-slate-500 mt-1">
                 Apakah Anda yakin ingin menyelesaikan dan mengirim jawaban ujian ini?
               </p>
             </div>
 
             {/* Summary Breakdown */}
-            <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 text-xs space-y-2 font-mono">
+            <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 text-xs space-y-2 font-mono">
               <div className="flex justify-between">
-                <span className="text-slate-400">Total Soal</span>
-                <span className="font-bold text-white">{soalList.length} Soal</span>
+                <span className="text-slate-500">Total Soal</span>
+                <span className="font-bold text-slate-900">{soalList.length} Soal</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-slate-400">Sudah Dijawab</span>
-                <span className="font-bold text-emerald-400">{answeredCount} Soal</span>
+                <span className="text-slate-500">Sudah Dijawab</span>
+                <span className="font-bold text-emerald-600">{answeredCount} Soal</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-slate-400">Jawaban Ragu-ragu</span>
-                <span className="font-bold text-amber-400">{raguCount} Soal</span>
+                <span className="text-slate-500">Jawaban Ragu-ragu</span>
+                <span className="font-bold text-amber-600">{raguCount} Soal</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-slate-400">Belum Dijawab</span>
-                <span className="font-bold text-rose-400">{unansweredCount} Soal</span>
+                <span className="text-slate-500">Belum Dijawab</span>
+                <span className="font-bold text-rose-600">{unansweredCount} Soal</span>
               </div>
             </div>
 
             {unansweredCount > 0 && (
-              <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs flex items-center gap-2">
+              <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-xs flex items-center gap-2">
                 <span>⚠️</span>
                 <span>Masih ada {unansweredCount} soal yang belum Anda jawab.</span>
               </div>
             )}
 
-            <div className="flex justify-end gap-2 pt-2 border-t border-slate-800">
+            <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
               <button
                 type="button"
                 onClick={() => setShowConfirmModal(false)}
                 disabled={isSubmitting}
-                className="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-300 border border-slate-700 hover:bg-slate-800 transition-all"
+                className="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-600 border border-slate-200 hover:bg-slate-50 transition-all cursor-pointer"
               >
                 Periksa Lagi
               </button>
@@ -516,7 +540,7 @@ export default function ExamInterface({
                 type="button"
                 onClick={handleSubmitExam}
                 disabled={isSubmitting}
-                className="px-5 py-2.5 rounded-xl text-xs font-extrabold bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg transition-all flex items-center gap-2"
+                className="px-5 py-2.5 rounded-xl text-xs font-extrabold bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs transition-all flex items-center gap-2 cursor-pointer"
               >
                 {isSubmitting ? (
                   <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
@@ -531,34 +555,61 @@ export default function ExamInterface({
 
       {/* Exit Confirmation Modal */}
       {showExitModal && (
-        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="max-w-sm w-full p-6 bg-slate-900 text-slate-100 border border-slate-800 rounded-3xl shadow-2xl space-y-4 animate-scale-in">
+        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="max-w-sm w-full p-6 bg-white text-slate-800 border border-slate-200 shadow-2xl rounded-3xl space-y-4 animate-scale-in">
             <div className="text-center">
-              <div className="w-12 h-12 rounded-2xl bg-rose-500/20 text-rose-400 flex items-center justify-center font-bold text-xl mx-auto mb-2">
+              <div className="w-12 h-12 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center font-bold text-xl mx-auto mb-2">
                 🚪
               </div>
-              <h3 className="text-base font-bold text-white">Keluar dari Ujian?</h3>
-              <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+              <h3 className="text-base font-bold text-slate-900">Keluar dari Ujian?</h3>
+              <p className="text-xs text-slate-500 mt-1 leading-relaxed">
                 Jawaban Anda yang telah diisi belum tersimpan secara permanen. Apakah Anda yakin ingin keluar?
               </p>
             </div>
 
-            <div className="flex justify-end gap-2 pt-2 border-t border-slate-800">
+            <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
               <button
                 type="button"
                 onClick={() => setShowExitModal(false)}
-                className="px-4 py-2 rounded-xl text-xs font-bold text-slate-300 border border-slate-700 hover:bg-slate-800"
+                className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 border border-slate-200 hover:bg-slate-50 cursor-pointer"
               >
                 Lanjutkan Ujian
               </button>
               <button
                 type="button"
                 onClick={handleExitConfirm}
-                className="px-4 py-2 rounded-xl text-xs font-bold bg-rose-600 hover:bg-rose-500 text-white shadow-md"
+                className="px-4 py-2 rounded-xl text-xs font-bold bg-rose-600 hover:bg-rose-700 text-white shadow-xs cursor-pointer"
               >
                 Ya, Keluar
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Image Zoom Lightbox */}
+      {zoomImage && (
+        <div
+          className="fixed inset-0 z-[60] bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 cursor-zoom-out"
+          onClick={() => setZoomImage(null)}
+        >
+          <div className="relative max-w-4xl w-full flex flex-col items-center gap-3">
+            <div className="absolute top-0 right-0 -mt-10">
+              <button
+                onClick={() => setZoomImage(null)}
+                className="w-8 h-8 rounded-full bg-white text-slate-700 hover:text-black flex items-center justify-center transition-all text-xs font-bold shadow-md cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={zoomImage}
+              alt="Gambar Soal (Perbesar)"
+              className="max-h-[80vh] max-w-full rounded-2xl shadow-2xl border border-slate-200 object-contain bg-white"
+              onClick={(e) => e.stopPropagation()}
+            />
+            <p className="text-xs text-white/80 mt-1">Klik di luar gambar untuk menutup</p>
           </div>
         </div>
       )}

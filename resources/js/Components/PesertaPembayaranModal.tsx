@@ -17,9 +17,9 @@ export default function PesertaPembayaranModal({
   onClose,
   onSuccess,
 }: PesertaPembayaranModalProps) {
-  const [program, setProgram] = useState<any>(null);
-  const totalBiaya = pendaftar.biaya_pelatihan || program?.harga || 3500000;
-  const totalFormatted = program?.harga_formatted || `Rp ${totalBiaya.toLocaleString('id-ID')}`;
+  const program = pendaftar.program;
+  const totalBiaya = program?.harga || pendaftar.biaya_pelatihan || 0;
+  const totalFormatted = `Rp ${totalBiaya.toLocaleString('id-ID')}`;
 
   const getInitialStep = (): ModalStep => {
     if (pendaftar.jenis_pembayaran === 'cicilan') return 'bayar_cicilan';

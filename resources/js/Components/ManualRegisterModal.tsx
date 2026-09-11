@@ -1,10 +1,10 @@
 'use client';
 
-import { useState } from 'react';
-import { formToApiPayload } from '@/lib/storage';
+import { useState, useEffect } from 'react';
+import { composeAlamat } from '@/lib/storage';
 import { pendaftarApi, programsApi } from '@/lib/api';
-import { useEffect } from 'react';
-import type { ProgramPelatihan, PendaftarFormData } from '@/lib/types';
+import type { ProgramPelatihan } from '@/lib/types';
+import AlamatForm, { type AlamatData } from '@/Components/AlamatForm';
 
 interface ManualRegisterModalProps {
   isOpen: boolean;
@@ -14,30 +14,43 @@ interface ManualRegisterModalProps {
 
 export default function ManualRegisterModal({ isOpen, onClose, onSuccess }: ManualRegisterModalProps) {
   const [programs, setPrograms] = useState<ProgramPelatihan[]>([]);
+  const [jenisPelatihan, setJenisPelatihan] = useState<string>('Menjahit');
 
   useEffect(() => {
     if (isOpen) {
-      programsApi.list().then(res => setPrograms(res.data || []));
+      programsApi.list().then((res) => {
+        const data = res.data || [];
+        setPrograms(data);
+        if (data.length > 0) {
+          setJenisPelatihan(data[0].nama);
+        } else {
+          setJenisPelatihan('Menjahit');
+        }
+      });
     }
   }, [isOpen]);
 
   const [namaLengkap, setNamaLengkap] = useState('');
   const [nik, setNik] = useState('');
-  const [jenisKelamin, setJenisKelamin] = useState<'Laki-laki' | 'Perempuan'>('Laki-laki');
-  const [tempatLahir, setTempatLahir] = useState('Jakarta');
+  const [tempatLahir, setTempatLahir] = useState('Garut');
   const [tanggalLahir, setTanggalLahir] = useState('2001-01-01');
-  const [alamat, setAlamat] = useState('');
   const [noHp, setNoHp] = useState('');
   const [email, setEmail] = useState('');
-  const [pendidikanTerakhir, setPendidikanTerakhir] = useState('SMA / SMK');
   
-  const [jenisPelatihan, setJenisPelatihan] = useState(programs[0]?.nama || 'Bahasa Jepang');
+  // Alamat breakdown state
+  const [alamatState, setAlamatState] = useState<AlamatData>({
+    provinsi: '',
+    kabupaten_kota: '',
+    kecamatan: '',
+    desa_kelurahan: '',
+    rt: '',
+    rw: '',
+    detail_alamat: '',
+  });
+
   const [status, setStatus] = useState<'diterima' | 'menunggu'>('diterima');
   const [statusPembayaran, setStatusPembayaran] = useState<'lunas' | 'belum_bayar' | 'cicilan_sebagian'>('lunas');
 
-  const [namaKontakDarurat, setNamaKontakDarurat] = useState('');
-  const [noHpKontakDarurat, setNoHpKontakDarurat] = useState('');
-  const [hubunganKontakDarurat, setHubunganKontakDarurat] = useState('Orang Tua');
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
@@ -55,23 +68,24 @@ export default function ManualRegisterModal({ isOpen, onClose, onSuccess }: Manu
 
     setIsSubmitting(true);
 
+    const selectedProg = programs.find((p) => p.nama === jenisPelatihan);
+
+    const finalAlamat = composeAlamat(alamatState) || 'Garut';
+
     try {
       await pendaftarApi.create({
         nama_lengkap: namaLengkap,
         nik: nik,
-        jenis_kelamin: jenisKelamin,
         tempat_lahir: tempatLahir,
         tanggal_lahir: tanggalLahir,
-        alamat: alamat,
+        alamat: finalAlamat,
         tinggi_badan: '165',
         berat_badan: '60',
         lingkar_pinggang: '75',
         no_hp: noHp,
         email: email || `${nik}@lpk.com`,
-        nama_kontak_darurat: namaKontakDarurat || 'Orang Tua',
-        no_hp_kontak_darurat: noHpKontakDarurat || noHp,
-        hubungan_kontak_darurat: hubunganKontakDarurat,
-        jenis_pelatihan: jenisPelatihan || 'Umum',
+        jenis_pelatihan: jenisPelatihan || 'Menjahit',
+        program_id: selectedProg?.id,
         motivasi: 'Pendaftaran manual oleh Admin.',
       });
       onSuccess();
@@ -87,7 +101,7 @@ export default function ManualRegisterModal({ isOpen, onClose, onSuccess }: Manu
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-fade-in overflow-y-auto">
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden border border-slate-200 my-8">
         {/* Header Modal */}
-        <div className="px-6 py-4 bg-gradient-to-r from-blue-900 to-indigo-900 text-white flex items-center justify-between">
+        <div className="px-6 py-4 bg-indigo-900 text-white flex items-center justify-between">
           <div className="flex items-center gap-2">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
@@ -100,7 +114,7 @@ export default function ManualRegisterModal({ isOpen, onClose, onSuccess }: Manu
         </div>
 
         {/* Form Body */}
-        <form onSubmit={handleSubmit} className="p-6 space-y-4 max-h-[75vh] overflow-y-auto">
+        <form onSubmit={handleSubmit} className="p-6 space-y-5 max-h-[75vh] overflow-y-auto">
           {errorMsg && (
             <div className="p-3 text-xs bg-red-50 text-red-700 border border-red-200 rounded-lg">
               {errorMsg}
@@ -137,19 +151,7 @@ export default function ManualRegisterModal({ isOpen, onClose, onSuccess }: Manu
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              <div>
-                <label className="form-label text-xs">Jenis Kelamin</label>
-                <select
-                  className="form-input text-xs"
-                  value={jenisKelamin}
-                  onChange={(e) => setJenisKelamin(e.target.value as any)}
-                >
-                  <option value="Laki-laki">Laki-laki</option>
-                  <option value="Perempuan">Perempuan</option>
-                </select>
-              </div>
-
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div>
                 <label className="form-label text-xs">Tempat Lahir</label>
                 <input
@@ -196,14 +198,11 @@ export default function ManualRegisterModal({ isOpen, onClose, onSuccess }: Manu
               </div>
             </div>
 
-            <div>
-              <label className="form-label text-xs">Alamat Lengkap</label>
-              <textarea
-                rows={2}
-                placeholder="Alamat rumah / domisili"
-                className="form-input text-xs"
-                value={alamat}
-                onChange={(e) => setAlamat(e.target.value)}
+            {/* Form Alamat Lengkap Regional */}
+            <div className="pt-2">
+              <AlamatForm
+                data={alamatState}
+                onChange={(field, val) => setAlamatState((prev) => ({ ...prev, [field]: val }))}
               />
             </div>
           </div>
@@ -216,22 +215,13 @@ export default function ManualRegisterModal({ isOpen, onClose, onSuccess }: Manu
               <div>
                 <label className="form-label text-xs">Program Pelatihan</label>
                 <select
-                  className="form-input text-xs font-semibold text-blue-900"
+                  className="form-input text-xs font-semibold text-indigo-900"
                   value={jenisPelatihan}
                   onChange={(e) => setJenisPelatihan(e.target.value)}
                 >
-                  {programs.length > 0 ? (
-                    programs.map((p) => (
-                      <option key={p.id} value={p.nama}>{p.nama}</option>
-                    ))
-                  ) : (
-                    <>
-                      <option value="Bahasa Jepang">Bahasa Jepang</option>
-                      <option value="Teknik Las">Teknik Las</option>
-                      <option value="Teknik Otomotif">Teknik Otomotif</option>
-                      <option value="Tata Boga">Tata Boga</option>
-                    </>
-                  )}
+                  {programs.map((p) => (
+                    <option key={p.id} value={p.nama}>{p.nama}</option>
+                  ))}
                 </select>
               </div>
 
@@ -264,13 +254,13 @@ export default function ManualRegisterModal({ isOpen, onClose, onSuccess }: Manu
 
           {/* Footer Buttons */}
           <div className="pt-4 flex items-center justify-end gap-2 border-t border-slate-100">
-            <button type="button" onClick={onClose} className="btn btn-outline text-xs px-4">
+            <button type="button" onClick={onClose} className="btn btn-secondary text-xs px-4">
               Batal
             </button>
             <button
               type="submit"
               disabled={isSubmitting}
-              className="btn btn-primary text-xs px-5 bg-blue-900 hover:bg-blue-800"
+              className="btn btn-primary text-xs px-5 bg-indigo-600 hover:bg-indigo-700 text-white"
             >
               {isSubmitting ? 'Mendaftarkan...' : '+ Simpan & Daftarkan Peserta'}
             </button>

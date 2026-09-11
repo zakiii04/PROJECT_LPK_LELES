@@ -14,6 +14,7 @@ import type {
   HasilUjian, Kelulusan, CreateKelulusanPayload,
   DashboardSummary, StatItem, UploadResponse,
   PaymentMethod, CreatePaymentMethodPayload,
+  TempatPelatihan,
 } from '@/lib/types';
 
 // Generic request handler — unwraps Laravel { success, data, message } envelope
@@ -133,8 +134,17 @@ export const pendaftarApi = {
     request<Pendaftar>(apiClient.post('/pendaftar', p)),
   update: (id: string, p: Partial<CreatePendaftarPayload>) =>
     request<Pendaftar>(apiClient.put(`/pendaftar/${id}`, p)),
-  updateStatus: (id: string, status: PendaftarStatus) =>
-    request<Pendaftar>(apiClient.patch(`/pendaftar/${id}/status`, { status })),
+  updateStatus: (
+    id: string,
+    status: PendaftarStatus,
+    verifikasiData?: {
+      tinggi_badan?: string;
+      berat_badan?: string;
+      lingkar_pinggang?: string;
+      berkas_verifikasi?: string[];
+    }
+  ) =>
+    request<Pendaftar>(apiClient.patch(`/pendaftar/${id}/status`, { status, ...verifikasiData })),
   alokasiAngkatan: (id: string, angkatan_id: string) =>
     request<Pendaftar>(apiClient.patch(`/pendaftar/${id}/angkatan`, { angkatan_id })),
   destroy: (id: string) =>
@@ -241,7 +251,7 @@ export const jadwalApi = {
 
 // ── Kehadiran ────────────────────────────────────────
 export const kehadiranApi = {
-  list: (params?: { pendaftar_id?: string; tanggal?: string }) =>
+  list: (params?: { pendaftar_id?: string; tanggal?: string; angkatan_id?: string }) =>
     request<Kehadiran[]>(apiClient.get('/kehadiran', { params })),
   show: (id: string) =>
     request<Kehadiran>(apiClient.get(`/kehadiran/${id}`)),
@@ -263,10 +273,39 @@ export const soalApi = {
     request<SoalUjian>(apiClient.get(`/soal/${id}`)),
   random: (params: { tipe: string; program_id: string; jumlah?: number }) =>
     request<SoalUjian[]>(apiClient.get('/soal/random', { params })),
-  create: (p: CreateSoalPayload) =>
-    request<SoalUjian>(apiClient.post('/soal', p)),
-  update: (id: string, p: Partial<CreateSoalPayload>) =>
-    request<SoalUjian>(apiClient.put(`/soal/${id}`, p)),
+  create: (p: CreateSoalPayload) => {
+    if (p.gambar_soal instanceof File) {
+      const fd = new FormData();
+      fd.append('jenis_pelatihan', p.jenis_pelatihan);
+      fd.append('tipe', p.tipe);
+      fd.append('pertanyaan', p.pertanyaan);
+      p.opsi.forEach((o) => fd.append('opsi[]', o));
+      fd.append('jawaban_benar', String(p.jawaban_benar));
+      if (p.program_id) fd.append('program_id', p.program_id);
+      fd.append('gambar_soal', p.gambar_soal);
+      return request<SoalUjian>(
+        apiClient.post('/soal', fd, { headers: { 'Content-Type': 'multipart/form-data' } })
+      );
+    }
+    return request<SoalUjian>(apiClient.post('/soal', p));
+  },
+  update: (id: string, p: Partial<CreateSoalPayload>) => {
+    if (p.gambar_soal instanceof File) {
+      const fd = new FormData();
+      if (p.jenis_pelatihan) fd.append('jenis_pelatihan', p.jenis_pelatihan);
+      if (p.tipe) fd.append('tipe', p.tipe);
+      if (p.pertanyaan) fd.append('pertanyaan', p.pertanyaan);
+      if (p.opsi) p.opsi.forEach((o) => fd.append('opsi[]', o));
+      if (p.jawaban_benar !== undefined) fd.append('jawaban_benar', String(p.jawaban_benar));
+      if (p.program_id) fd.append('program_id', p.program_id);
+      fd.append('gambar_soal', p.gambar_soal);
+      fd.append('_method', 'PUT');
+      return request<SoalUjian>(
+        apiClient.post(`/soal/${id}`, fd, { headers: { 'Content-Type': 'multipart/form-data' } })
+      );
+    }
+    return request<SoalUjian>(apiClient.put(`/soal/${id}`, p));
+  },
   destroy: (id: string) =>
     request<null>(apiClient.delete(`/soal/${id}`)),
 };
@@ -297,6 +336,8 @@ export const kelulusanApi = {
     request<Kelulusan>(apiClient.post('/kelulusan', p)),
   update: (id: string, p: Partial<CreateKelulusanPayload>) =>
     request<Kelulusan>(apiClient.put(`/kelulusan/${id}`, p)),
+  destroy: (id: string) =>
+    request<null>(apiClient.delete(`/kelulusan/${id}`)),
 };
 
 // ── Sertifikat ───────────────────────────────────────
@@ -353,3 +394,38 @@ export const uploadApi = {
     );
   },
 };
+
+// ── Mata Pelajaran ──────────────────────────────────
+import type { MataPelajaran, CreateMataPelajaranPayload, Nilai, CreateNilaiPayload, AbsensiData } from './types';
+
+export const mataPelajaranApi = {
+  list: (params?: { program_id?: string }) =>
+    request<MataPelajaran[]>(apiClient.get('/mata-pelajaran', { params })),
+  create: (p: CreateMataPelajaranPayload) =>
+    request<MataPelajaran>(apiClient.post('/mata-pelajaran', p)),
+  update: (id: string, p: Partial<CreateMataPelajaranPayload>) =>
+    request<MataPelajaran>(apiClient.put(`/mata-pelajaran/${id}`, p)),
+  destroy: (id: string) =>
+    request<null>(apiClient.delete(`/mata-pelajaran/${id}`)),
+};
+
+// ── Nilai ───────────────────────────────────────────
+export const nilaiApi = {
+  list: (params?: { pendaftar_id?: string; mata_pelajaran_id?: string; tipe_nilai?: string }) =>
+    request<Nilai[]>(apiClient.get('/nilai', { params })),
+  create: (p: CreateNilaiPayload) =>
+    request<Nilai>(apiClient.post('/nilai', p)),
+  update: (id: string, p: { nilai: number; catatan?: string; tanggal?: string }) =>
+    request<Nilai>(apiClient.put(`/nilai/${id}`, p)),
+  destroy: (id: string) =>
+    request<null>(apiClient.delete(`/nilai/${id}`)),
+  bulk: (data: Array<CreateNilaiPayload & { mata_pelajaran_id?: string }>) =>
+    request<{ message: string }>(apiClient.post('/nilai/bulk', { data })),
+};
+
+// ── Absensi ─────────────────────────────────────────
+export const absensiApi = {
+  get: (params: { angkatan_id?: string; program_id?: string }) =>
+    request<AbsensiData>(apiClient.get('/absensi', { params })),
+};
+

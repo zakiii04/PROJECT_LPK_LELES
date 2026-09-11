@@ -19,6 +19,7 @@ class SoalUjian extends Model
         'opsi',
         'jawaban_benar',
         'program_id',
+        'gambar_soal',
     ];
 
     protected $casts = [

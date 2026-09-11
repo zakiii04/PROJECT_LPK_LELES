@@ -8,7 +8,7 @@ import Step1DataDiri from '@/Components/Step1DataDiri';
 import Step2DataFisik from '@/Components/Step2DataFisik';
 import Step3KontakDarurat from '@/Components/Step3KontakDarurat';
 import Step4PilihanPelatihan from '@/Components/Step4PilihanPelatihan';
-import { JENIS_PELATIHAN, type PendaftarFormData, composeAlamat, formToApiPayload } from '@/lib/storage';
+import { type PendaftarFormData, formToApiPayload } from '@/lib/storage';
 import { pendaftarApi } from '@/lib/api';
 import type { Pendaftar } from '@/lib/types';
 
@@ -19,22 +19,17 @@ const initialFormData: PendaftarFormData = {
   nik: '',
   tempat_lahir: '',
   tanggal_lahir: '',
-  jenis_kelamin: 'Laki-laki',
+  alamat_lengkap: '',
   provinsi: '',
   kabupaten_kota: '',
   kecamatan: '',
   desa_kelurahan: '',
-  rt: '',
-  rw: '',
   tinggi_badan: '',
   berat_badan: '',
   lingkar_pinggang: '',
   riwayat_penyakit: '',
   no_hp: '',
   email: '',
-  nama_kontak_darurat: '',
-  no_hp_kontak_darurat: '',
-  hubungan_kontak_darurat: '',
   jenis_pelatihan: '',
   motivasi: '',
   username: '',
@@ -68,13 +63,21 @@ export default function PendaftaranPage() {
       else if (formData.nik.length !== 16) newErrors.nik = 'NIK harus 16 digit';
       if (!formData.tempat_lahir.trim()) newErrors.tempat_lahir = 'Tempat lahir wajib diisi';
       if (!formData.tanggal_lahir) newErrors.tanggal_lahir = 'Tanggal lahir wajib diisi';
-      if (!formData.jenis_kelamin) newErrors.jenis_kelamin = 'Jenis kelamin wajib dipilih';
-      if (!formData.provinsi?.trim()) newErrors.provinsi = 'Provinsi wajib diisi';
-      if (!formData.kabupaten_kota?.trim()) newErrors.kabupaten_kota = 'Kabupaten/Kota wajib diisi';
-      if (!formData.kecamatan?.trim()) newErrors.kecamatan = 'Kecamatan wajib diisi';
-      if (!formData.desa_kelurahan?.trim()) newErrors.desa_kelurahan = 'Desa/Kelurahan wajib diisi';
-      if (!formData.rt?.trim()) newErrors.rt = 'RT wajib diisi';
-      if (!formData.rw?.trim()) newErrors.rw = 'RW wajib diisi';
+      else {
+        const birthDate = new Date(formData.tanggal_lahir);
+        const today = new Date();
+        let age = today.getFullYear() - birthDate.getFullYear();
+        const birthdayPassed =
+          today.getMonth() > birthDate.getMonth() ||
+          (today.getMonth() === birthDate.getMonth() && today.getDate() >= birthDate.getDate());
+        if (!birthdayPassed) age--;
+        if (age < 18) newErrors.tanggal_lahir = 'Usia peserta harus minimal 18 tahun';
+      }
+      if (!formData.alamat_lengkap.trim()) newErrors.alamat_lengkap = 'Alamat lengkap wajib diisi';
+      if (!formData.provinsi?.trim()) newErrors.provinsi = 'Provinsi wajib dipilih';
+      if (!formData.kabupaten_kota?.trim()) newErrors.kabupaten_kota = 'Kabupaten/Kota wajib dipilih';
+      if (!formData.kecamatan?.trim()) newErrors.kecamatan = 'Kecamatan wajib dipilih';
+      if (!formData.desa_kelurahan?.trim()) newErrors.desa_kelurahan = 'Kelurahan wajib dipilih';
     }
 
     if (step === 2) {
@@ -84,6 +87,16 @@ export default function PendaftaranPage() {
       if (!formData.berat_badan) newErrors.berat_badan = 'Berat badan wajib diisi';
       else if (Number(formData.berat_badan) < 30 || Number(formData.berat_badan) > 200)
         newErrors.berat_badan = 'Berat badan harus antara 30-200 kg';
+      if (
+        formData.tinggi_badan &&
+        formData.berat_badan &&
+        Number(formData.tinggi_badan) > 0 &&
+        Number(formData.berat_badan) > 0
+      ) {
+        const heightInMeters = Number(formData.tinggi_badan) / 100;
+        const bmi = Number(formData.berat_badan) / (heightInMeters * heightInMeters);
+        if (bmi < 18) newErrors.berat_badan = 'BMI peserta harus minimal 18';
+      }
       if (!formData.lingkar_pinggang) newErrors.lingkar_pinggang = 'Lingkar pinggang wajib diisi';
       else if (Number(formData.lingkar_pinggang) < 30 || Number(formData.lingkar_pinggang) > 200)
         newErrors.lingkar_pinggang = 'Lingkar pinggang harus antara 30-200 cm';
@@ -207,10 +220,10 @@ export default function PendaftaranPage() {
               </div>
 
               <div className="flex flex-col sm:flex-row gap-3 justify-center">
-                <button onClick={() => router.push(`/status?no=${no_pendaftaran}`)} className="btn btn-primary">
+                <button onClick={() => router.visit(`/status?no=${no_pendaftaran}`)} className="btn btn-primary">
                   Cek Status Pendaftaran
                 </button>
-                <button onClick={() => router.push('/')} className="btn btn-outline">
+                <button onClick={() => router.visit('/')} className="btn btn-outline">
                   Kembali ke Beranda
                 </button>
               </div>

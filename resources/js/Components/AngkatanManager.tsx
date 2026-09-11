@@ -26,10 +26,20 @@ const formatDateOnly = (dateStr?: string) => {
   return cleanStr;
 };
 
-export default function AngkatanManager() {
-  const [angkatanList, setAngkatanList] = useState<Angkatan[]>([]);
-  const [pendaftarList, setPendaftarList] = useState<Pendaftar[]>([]);
-  const [programList, setProgramList] = useState<Program[]>([]);
+interface AngkatanManagerProps {
+  initialAngkatanList?: Angkatan[];
+  initialPendaftarList?: Pendaftar[];
+  initialProgramList?: Program[];
+}
+
+export default function AngkatanManager({
+  initialAngkatanList = [],
+  initialPendaftarList = [],
+  initialProgramList = [],
+}: AngkatanManagerProps) {
+  const [angkatanList, setAngkatanList] = useState<Angkatan[]>(initialAngkatanList);
+  const [pendaftarList, setPendaftarList] = useState<Pendaftar[]>(initialPendaftarList);
+  const [programList, setProgramList] = useState<Program[]>(initialProgramList);
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingAngkatan, setEditingAngkatan] = useState<Angkatan | null>(null);
   const [selectedAngkatanForPlotting, setSelectedAngkatanForPlotting] = useState<Angkatan | null>(null);
@@ -42,7 +52,7 @@ export default function AngkatanManager() {
   // Form states for Angkatan
   const [kode, setKode] = useState('');
   const [nama, setNama] = useState('');
-  const [program, setProgram] = useState('');
+  const [program, setProgram] = useState(initialProgramList[0]?.nama || '');
   const [tahun, setTahun] = useState(2026);
   const [periode, setPeriode] = useState('September - November 2026');
   const [tglMulaiReg, setTglMulaiReg] = useState('');
@@ -75,8 +85,17 @@ export default function AngkatanManager() {
   }, [program]);
 
   useEffect(() => {
-    loadData();
-  }, [loadData]);
+    if (initialAngkatanList.length > 0) setAngkatanList(initialAngkatanList);
+    if (initialPendaftarList.length > 0) setPendaftarList(initialPendaftarList);
+    if (initialProgramList.length > 0) {
+      setProgramList(initialProgramList);
+      if (!program) setProgram(initialProgramList[0].nama);
+    }
+
+    if (initialAngkatanList.length === 0 || initialProgramList.length === 0) {
+      loadData();
+    }
+  }, [initialAngkatanList, initialPendaftarList, initialProgramList]);
 
   const handleOpenViewPeserta = async (ang: Angkatan) => {
     setSelectedAngkatanForViewPeserta(ang);
@@ -196,6 +215,38 @@ export default function AngkatanManager() {
     }
   };
 
+  // Helper untuk mengekstrak nomor angkatan (misal: "ANG-51" -> 51)
+  const getAngkatanNumber = (ang: Angkatan) => {
+    const matchKode = (ang.kode_angkatan || '').match(/\d+/);
+    if (matchKode) return parseInt(matchKode[0], 10);
+    const matchNama = (ang.nama_angkatan || '').match(/\d+/);
+    if (matchNama) return parseInt(matchNama[0], 10);
+    return 0;
+  };
+
+  // Urutkan angkatan terbaru berada paling atas
+  const sortedAngkatanList = [...angkatanList].sort((a, b) => {
+    const numA = getAngkatanNumber(a);
+    const numB = getAngkatanNumber(b);
+    if (numA !== numB) return numB - numA;
+
+    const tahunA = a.tahun || 0;
+    const tahunB = b.tahun || 0;
+    if (tahunA !== tahunB) return tahunB - tahunA;
+
+    const dateA = a.tanggal_mulai ? new Date(a.tanggal_mulai).getTime() : 0;
+    const dateB = b.tanggal_mulai ? new Date(b.tanggal_mulai).getTime() : 0;
+    return dateB - dateA;
+  });
+
+  // Hitung jumlah peserta terdaftar secara akurat dari pendaftarList / relasi / pendaftar_count
+  const getFilledCount = (ang: Angkatan) => {
+    const listCount = pendaftarList.filter((p) => p.angkatan_id === ang.id).length;
+    const relCount = (ang.pendaftar && Array.isArray(ang.pendaftar)) ? ang.pendaftar.length : 0;
+    const serverCount = typeof ang.pendaftar_count === 'number' ? ang.pendaftar_count : 0;
+    return Math.max(listCount, relCount, serverCount);
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -218,8 +269,8 @@ export default function AngkatanManager() {
 
       {/* Grid Cards Angkatan */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {angkatanList.map((ang) => {
-          const filledCount = ang.pendaftar_count || (ang.pendaftar || []).length;
+        {sortedAngkatanList.map((ang) => {
+          const filledCount = getFilledCount(ang);
           const percentage = Math.min(100, Math.round((filledCount / ang.kuota) * 100));
 
           return (
@@ -464,7 +515,7 @@ export default function AngkatanManager() {
                   Plotting Peserta — {selectedAngkatanForPlotting.nama_angkatan}
                 </h3>
                 <p className="text-[11px] text-slate-500">
-                  {selectedAngkatanForPlotting.program?.nama || selectedAngkatanForPlotting.kode_angkatan} • Terisi: {selectedAngkatanForPlotting.pendaftar_count || (selectedAngkatanForPlotting.pendaftar || []).length} / {selectedAngkatanForPlotting.kuota}
+                  {selectedAngkatanForPlotting.program?.nama || selectedAngkatanForPlotting.kode_angkatan} • Terisi: {getFilledCount(selectedAngkatanForPlotting)} / {selectedAngkatanForPlotting.kuota}
                 </p>
               </div>
               <button onClick={() => setSelectedAngkatanForPlotting(null)} className="text-slate-400 hover:text-black">✕</button>
@@ -588,7 +639,7 @@ export default function AngkatanManager() {
                           </span>
                         </div>
                         <div className="text-[11px] text-slate-500 font-mono">
-                          NIK: {p.nik} • {p.jenis_kelamin} • HP: {p.no_hp}
+                          NIK: {p.nik} • HP: {p.no_hp}
                         </div>
                       </div>
 

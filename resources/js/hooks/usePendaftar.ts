@@ -57,8 +57,21 @@ export function useCreatePendaftar() {
 export function useUpdatePendaftarStatus() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ id, status }: { id: string; status: PendaftarStatus }) => {
-      const res = await pendaftarApi.updateStatus(id, status);
+    mutationFn: async ({
+      id,
+      status,
+      verifikasiData,
+    }: {
+      id: string;
+      status: PendaftarStatus;
+      verifikasiData?: {
+        tinggi_badan?: string;
+        berat_badan?: string;
+        lingkar_pinggang?: string;
+        berkas_verifikasi?: string[];
+      };
+    }) => {
+      const res = await pendaftarApi.updateStatus(id, status, verifikasiData);
       if (!res.success) throw new Error(res.error);
       return res.data!;
     },

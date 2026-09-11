@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import CertificateView from '@/Components/CertificateView';
 import DeleteConfirmModal from '@/Components/DeleteConfirmModal';
+import Pagination from '@/Components/Pagination';
 import { pendaftarApi, hasilUjianApi, kehadiranApi, kelulusanApi } from '@/lib/api';
 import type { Pendaftar, Kelulusan, HasilUjian, Kehadiran } from '@/lib/types';
 
@@ -14,6 +15,8 @@ export default function GraduationManager() {
 
   const [hasilUjianList, setHasilUjianList] = useState<HasilUjian[]>([]);
   const [kehadiranList, setKehadiranList] = useState<Kehadiran[]>([]);
+  const [currentPage, setCurrentPage] = useState(1);
+  const pageSize = 10;
 
   const loadData = useCallback(async () => {
     const [pRes, kRes, hRes, khRes] = await Promise.all([
@@ -26,6 +29,7 @@ export default function GraduationManager() {
     setKelulusanList(kRes.data || []);
     setHasilUjianList(hRes.data || []);
     setKehadiranList(khRes.data || []);
+    setCurrentPage(1);
   }, []);
 
   useEffect(() => {
@@ -41,9 +45,9 @@ export default function GraduationManager() {
     status_kelulusan: 'Lulus' | 'Tidak_Lulus'
   ) => {
     // Weighted formula: 15% Pretest, 45% Posttest, 20% Kehadiran, 20% Tugas
-    const nilai_akhir = Math.round(
+    const nilai_akhir = Number((
       nilaiPretest * 0.15 + nilaiPosttest * 0.45 + nilaiKehadiran * 0.2 + nilaiTugas * 0.2
-    );
+    ).toFixed(2));
 
     const res = await kelulusanApi.create({
       pendaftar_id: pendaftar.id,
@@ -72,14 +76,25 @@ export default function GraduationManager() {
 
   const confirmResetKelulusan = async () => {
     if (!deleteTarget) return;
-    // API currently doesn't have destroy for kelulusan in the types provided, but let's assume kelulusanApi.destroy exists or we just call loadData.
-    // await kelulusanApi.destroy(deleteTarget.pendaftarId);
+    const kelulusan = kelulusanList.find((item) => item.pendaftar_id === deleteTarget.pendaftarId);
+    if (kelulusan) {
+      await kelulusanApi.destroy(kelulusan.id);
+    }
     setDeleteTarget(null);
     await loadData();
   };
 
   return (
     <div className="space-y-6">
+      <DeleteConfirmModal
+        open={Boolean(deleteTarget)}
+        title="Hapus Data Kelulusan?"
+        message="Anda yakin ingin menghapus data kelulusan"
+        itemName={deleteTarget?.name || null}
+        onConfirm={confirmResetKelulusan}
+        onCancel={() => setDeleteTarget(null)}
+      />
+
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[var(--card-border)]">
         <div>
@@ -113,18 +128,22 @@ export default function GraduationManager() {
                 </td>
               </tr>
             ) : (
-              pendaftarList.map((p: Pendaftar) => {
+              pendaftarList.slice((currentPage - 1) * pageSize, currentPage * pageSize).map((p: Pendaftar) => {
                 const kelulusan = kelulusanList.find((k: Kelulusan) => k.pendaftar_id === p.id);
-                const pretest = hasilUjianList.find((h: HasilUjian) => h.pendaftar_id === p.id && h.tipe === 'pretest');
-                const posttest = hasilUjianList.find((h: HasilUjian) => h.pendaftar_id === p.id && h.tipe === 'posttest');
+                const pretest = hasilUjianList
+                  .filter((h: HasilUjian) => h.pendaftar_id === p.id && h.tipe === 'pretest')
+                  .sort((a, b) => b.nilai - a.nilai)[0];
+                const posttest = hasilUjianList
+                  .filter((h: HasilUjian) => h.pendaftar_id === p.id && h.tipe === 'posttest')
+                  .sort((a, b) => b.nilai - a.nilai)[0];
                 const pKehadiran = kehadiranList.filter((k: Kehadiran) => k.pendaftar_id === p.id);
                 const hadirCount = pKehadiran.filter((k: Kehadiran) => k.status_kehadiran === 'Hadir').length;
-                const nilaiKehadiran = pKehadiran.length > 0 ? Math.round((hadirCount / pKehadiran.length) * 100) : 90;
+                const nilaiKehadiran = pKehadiran.length > 0 ? Number(((hadirCount / pKehadiran.length) * 100).toFixed(2)) : 0;
 
-                const vPre = pretest?.nilai || 75;
-                const vPost = posttest?.nilai || 85;
-                const vTugas = 85;
-                const vAkhir = Math.round(vPre * 0.15 + vPost * 0.45 + nilaiKehadiran * 0.2 + vTugas * 0.2);
+                const vPre = pretest?.nilai || 0;
+                const vPost = posttest?.nilai || 0;
+                const vTugas = kelulusan?.nilai_tugas || 0;
+                const vAkhir = Number((vPre * 0.15 + vPost * 0.45 + nilaiKehadiran * 0.2 + vTugas * 0.2).toFixed(2));
 
                 return (
                   <tr key={p.id} className="hover:bg-slate-50">
@@ -137,8 +156,8 @@ export default function GraduationManager() {
                       <div className="font-bold text-slate-800 text-xs">{p.nama_lengkap}</div>
                     </td>
                     <td className="text-xs font-semibold text-slate-700">{p.jenis_pelatihan}</td>
-                    <td className="font-mono text-xs text-slate-600">{pretest ? `${pretest.nilai}` : '75 (Default)'}</td>
-                    <td className="font-mono text-xs text-slate-600">{posttest ? `${posttest.nilai}` : '85 (Default)'}</td>
+                    <td className="font-mono text-xs text-slate-600">{pretest ? `${pretest.nilai}` : '-'}</td>
+                    <td className="font-mono text-xs text-slate-600">{posttest ? `${posttest.nilai}` : '-'}</td>
                     <td className="font-mono text-xs font-extrabold text-indigo-600">{kelulusan ? kelulusan.nilai_akhir : vAkhir} / 100</td>
                     <td>
                       <span
@@ -150,11 +169,15 @@ export default function GraduationManager() {
                             : 'badge-pending'
                         }`}
                       >
-                        {kelulusan?.status_kelulusan === 'Tidak_Lulus' ? 'Tidak Lulus' : (kelulusan?.status_kelulusan || 'Belum Ditetapkan')}
+                        {kelulusan?.status_kelulusan === 'Tidak_Lulus'
+                          ? 'Tidak Lulus'
+                          : kelulusan?.status_kelulusan === 'Dalam_Proses'
+                            ? 'Dalam Proses'
+                            : (kelulusan?.status_kelulusan || 'Dalam Proses')}
                       </span>
                     </td>
                     <td className="whitespace-nowrap">
-                      {kelulusan ? (
+                      {kelulusan && kelulusan.status_kelulusan !== 'Dalam_Proses' ? (
                         <div className="flex items-center gap-1.5">
                           {kelulusan.status_kelulusan === 'Lulus' && (
                             <button
@@ -180,7 +203,7 @@ export default function GraduationManager() {
                           </button>
                         </div>
                       ) : (
-                        <div className="flex gap-1">
+                        <div className="flex items-center gap-1.5 flex-wrap">
                           <button
                             onClick={() => handleIssueKelulusan(p, vPre, vPost, nilaiKehadiran, vTugas, 'Lulus')}
                             className="btn btn-primary btn-sm bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] flex items-center gap-1"
@@ -200,6 +223,18 @@ export default function GraduationManager() {
                             </svg>
                             <span>Gagal</span>
                           </button>
+                          {kelulusan && (
+                            <button
+                              onClick={() => handleResetKelulusan(p.id, p.nama_lengkap)}
+                              className="btn btn-ghost btn-sm text-red-600 hover:bg-red-50 text-[11px] flex items-center gap-1"
+                            >
+                              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <polyline points="3 6 5 6 21 6" />
+                                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                              </svg>
+                              <span>Reset / Hapus</span>
+                            </button>
+                          )}
                         </div>
                       )}
                     </td>
@@ -209,6 +244,12 @@ export default function GraduationManager() {
             )}
           </tbody>
         </table>
+        <Pagination
+          currentPage={currentPage}
+          totalItems={pendaftarList.length}
+          pageSize={pageSize}
+          onPageChange={setCurrentPage}
+        />
       </div>
 
       {/* Modal Preview Sertifikat Digital */}

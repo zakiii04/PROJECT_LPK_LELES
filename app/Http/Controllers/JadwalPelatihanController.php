@@ -1,8 +1,7 @@
 <?php
 
-namespace App\Http\Controllers\Api;
+namespace App\Http\Controllers;
 
-use App\Http\Controllers\Controller;
 use App\Models\JadwalPelatihan;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
@@ -39,11 +38,16 @@ class JadwalPelatihanController extends Controller
         $v['id'] = Str::uuid()->toString();
         $jadwal = JadwalPelatihan::create($v);
 
-        // Jika angkatan_id diisi, otomatis tarik seluruh peserta angkatan tersebut ke jadwal ini
         if (!empty($v['angkatan_id'])) {
-            $pendaftarIds = \App\Models\Pendaftar::where('angkatan_id', $v['angkatan_id'])
-                ->where('status', 'diterima')
-                ->pluck('id');
+            $pendaftarQuery = \App\Models\Pendaftar::where('angkatan_id', $v['angkatan_id'])
+                ->where('status', 'diterima');
+
+            if (!empty($v['tempat_pelatihan'])) {
+                $tempatNama = trim(explode(' (', $v['tempat_pelatihan'])[0]);
+                $pendaftarQuery->where('tempat_pelatihan', 'like', '%' . $tempatNama . '%');
+            }
+
+            $pendaftarIds = $pendaftarQuery->pluck('id');
             if ($pendaftarIds->count() > 0) {
                 $jadwal->peserta()->syncWithoutDetaching($pendaftarIds);
             }

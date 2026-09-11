@@ -39,7 +39,7 @@ export default function AdminLoginPage() {
         const token = data.token || data.access_token;
         const user = data.user;
         if (token) {
-          setToken(token);
+          setToken(token, 'ADMIN');
         }
         if (user) {
           localStorage.setItem('user', JSON.stringify(user));
@@ -48,7 +48,6 @@ export default function AdminLoginPage() {
         router.visit('/admin/dashboard');
         return;
       } else if (res.error) {
-        // Jika server backend membalas pesan error dari Laravel
         setError(res.error);
         setIsLoading(false);
         return;
@@ -58,7 +57,8 @@ export default function AdminLoginPage() {
     }
 
     // 2. Fallback jika offline / demo
-    if (cleanUsername.toLowerCase() === 'admin' && cleanPassword === 'admin123') {
+    if (cleanUsername.toLowerCase() === 'admin' && (cleanPassword === 'admin123' || cleanPassword === 'password')) {
+      setToken('admin_demo_token', 'ADMIN');
       sessionStorage.setItem('lpk_admin_logged_in', 'true');
       router.visit('/admin/dashboard');
     } else {

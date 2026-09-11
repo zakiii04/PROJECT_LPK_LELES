@@ -5,8 +5,12 @@ import { programsApi } from '@/lib/api';
 import type { ProgramPelatihan } from '@/lib/types';
 import DeleteConfirmModal from '@/Components/DeleteConfirmModal';
 
-export default function PelatihanManager() {
-  const [programList, setProgramList] = useState<ProgramPelatihan[]>([]);
+interface PelatihanManagerProps {
+  initialProgramList?: ProgramPelatihan[];
+}
+
+export default function PelatihanManager({ initialProgramList = [] }: PelatihanManagerProps) {
+  const [programList, setProgramList] = useState<ProgramPelatihan[]>(initialProgramList);
   const [showModal, setShowModal] = useState(false);
   const [editingProgram, setEditingProgram] = useState<ProgramPelatihan | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
@@ -27,8 +31,12 @@ export default function PelatihanManager() {
   }, []);
 
   useEffect(() => {
-    loadData();
-  }, [loadData]);
+    if (initialProgramList.length > 0) {
+      setProgramList(initialProgramList);
+    } else {
+      loadData();
+    }
+  }, [initialProgramList]);
 
   const handleOpenAddModal = () => {
     setEditingProgram(null);
@@ -63,7 +71,7 @@ export default function PelatihanManager() {
         });
       } else {
         await programsApi.create({
-          id: '',
+          id: undefined as any,
           nama,
           deskripsi,
           durasi,

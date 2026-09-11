@@ -31,9 +31,7 @@ export default function PesertaLoginPage() {
         const token = data.token || data.access_token;
         const user = data.user as any;
         if (token) {
-          localStorage.setItem('token', token);
-          localStorage.setItem('lpk_auth_token', token);
-          setToken(token);
+          setToken(token, 'PESERTA');
         }
         if (user) {
           localStorage.setItem('user', JSON.stringify(user));

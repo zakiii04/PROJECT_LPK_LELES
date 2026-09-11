@@ -1,8 +1,7 @@
 <?php
 
-namespace App\Http\Controllers\Api;
+namespace App\Http\Controllers;
 
-use App\Http\Controllers\Controller;
 use App\Models\ProgramPelatihan;
 use Illuminate\Http\Request;
 
@@ -35,14 +34,21 @@ class ProgramPelatihanController extends Controller
     public function store(Request $request)
     {
         $validated = $request->validate([
-            'id'              => 'required|string|unique:program_pelatihans,id',
+            'id'              => 'nullable|string|unique:program_pelatihans,id',
             'nama'            => 'required|string|unique:program_pelatihans,nama',
             'deskripsi'       => 'required|string',
             'durasi'          => 'required|string',
             'harga'           => 'required|numeric|min:0',
-            'harga_formatted' => 'required|string',
+            'harga_formatted' => 'nullable|string',
             'icon'            => 'nullable|string',
         ]);
+
+        if (empty($validated['id'])) {
+            $validated['id'] = \Illuminate\Support\Str::slug($validated['nama'], '_') ?: ('prog_' . \Illuminate\Support\Str::random(5));
+        }
+        if (empty($validated['harga_formatted']) && isset($validated['harga'])) {
+            $validated['harga_formatted'] = 'Rp ' . number_format((float)$validated['harga'], 0, ',', '.');
+        }
 
         $program = ProgramPelatihan::create($validated);
 
@@ -62,9 +68,13 @@ class ProgramPelatihanController extends Controller
             'deskripsi'       => 'sometimes|string',
             'durasi'          => 'sometimes|string',
             'harga'           => 'sometimes|numeric|min:0',
-            'harga_formatted' => 'sometimes|string',
+            'harga_formatted' => 'nullable|string',
             'icon'            => 'nullable|string',
         ]);
+
+        if (isset($validated['harga']) && empty($validated['harga_formatted'])) {
+            $validated['harga_formatted'] = 'Rp ' . number_format((float)$validated['harga'], 0, ',', '.');
+        }
 
         $program->update($validated);
 

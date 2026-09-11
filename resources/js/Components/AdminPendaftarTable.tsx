@@ -1,19 +1,38 @@
-'use client';
-
+import { useState, useEffect } from 'react';
+import { router } from '@inertiajs/react';
 import {
   type Pendaftar,
   getStatusLabel,
   getStatusBadgeClass,
-  JENIS_PELATIHAN,
 } from '@/lib/storage';
+import Pagination from '@/Components/Pagination';
 
 interface AdminPendaftarTableProps {
   data: Pendaftar[];
-  onViewDetail: (pendaftar: Pendaftar) => void;
+  onViewDetail?: (pendaftar: Pendaftar) => void;
   onDeletePendaftar?: (pendaftarId: string, nama: string) => void;
 }
 
 export default function AdminPendaftarTable({ data, onViewDetail, onDeletePendaftar }: AdminPendaftarTableProps) {
+  const [currentPage, setCurrentPage] = useState(1);
+  const pageSize = 10;
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [data.length]);
+
+  const totalPages = Math.ceil(data.length / pageSize);
+  const validPage = Math.min(currentPage, Math.max(1, totalPages));
+  const paginatedData = data.slice((validPage - 1) * pageSize, validPage * pageSize);
+
+  const handleDetail = (pendaftar: Pendaftar) => {
+    if (onViewDetail) {
+      onViewDetail(pendaftar);
+    } else {
+      router.visit(`/admin/peserta/${pendaftar.id}`);
+    }
+  };
+
   if (data.length === 0) {
     return (
       <div className="text-center py-16">
@@ -45,7 +64,7 @@ export default function AdminPendaftarTable({ data, onViewDetail, onDeletePendaf
           </tr>
         </thead>
         <tbody>
-          {data.map((pendaftar) => {
+          {paginatedData.map((pendaftar) => {
             return (
               <tr key={pendaftar.id} className="hover:bg-[var(--surface-hover)] transition-colors">
                 <td className="whitespace-nowrap">
@@ -58,7 +77,6 @@ export default function AdminPendaftarTable({ data, onViewDetail, onDeletePendaf
                   <div className="text-[10px] text-[var(--text-tertiary)] flex items-center gap-1 mt-0.5 whitespace-nowrap">
                     <span>NIK: {pendaftar.nik}</span>
                     <span>•</span>
-                    <span>{pendaftar.jenis_kelamin}</span>
                   </div>
                 </td>
                 <td className="hidden md:table-cell whitespace-nowrap">
@@ -115,14 +133,14 @@ export default function AdminPendaftarTable({ data, onViewDetail, onDeletePendaf
                 <td className="whitespace-nowrap text-center">
                   <div className="flex items-center justify-center gap-1.5">
                     <button
-                      onClick={() => onViewDetail(pendaftar)}
-                      className="inline-flex items-center gap-1 text-[11px] font-semibold text-slate-600 hover:text-slate-900 hover:bg-slate-100/80 px-2 py-0.5 rounded transition-colors"
+                      onClick={() => handleDetail(pendaftar)}
+                      className="inline-flex items-center gap-1 text-[11px] font-semibold text-indigo-600 hover:text-indigo-900 hover:bg-indigo-50 px-2.5 py-1 rounded transition-colors border border-indigo-100"
                     >
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-slate-400">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-indigo-500">
                         <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
                         <circle cx="12" cy="12" r="3" />
                       </svg>
-                      Detail
+                      Detail & Edit
                     </button>
                     {onDeletePendaftar && (
                       <button
@@ -143,6 +161,12 @@ export default function AdminPendaftarTable({ data, onViewDetail, onDeletePendaf
           })}
         </tbody>
       </table>
+      <Pagination
+        currentPage={validPage}
+        totalItems={data.length}
+        pageSize={pageSize}
+        onPageChange={setCurrentPage}
+      />
     </div>
   );
 }

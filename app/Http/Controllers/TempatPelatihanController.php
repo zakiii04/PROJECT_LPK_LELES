@@ -1,8 +1,7 @@
 <?php
 
-namespace App\Http\Controllers\Api;
+namespace App\Http\Controllers;
 
-use App\Http\Controllers\Controller;
 use App\Models\TempatPelatihan;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
@@ -11,7 +10,6 @@ class TempatPelatihanController extends Controller
 {
     public function index()
     {
-        // Auto-seed default places if empty
         if (TempatPelatihan::count() === 0) {
             TempatPelatihan::create([
                 'id' => 't-1',

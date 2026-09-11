@@ -1,5 +1,6 @@
-'use client';
-
+import { useState, useEffect } from 'react';
+import { programsApi, tempatApi } from '@/lib/api';
+import type { ProgramPelatihan, TempatPelatihan } from '@/lib/types';
 import type { PendaftarFormData } from '@/lib/storage';
 
 interface Step4Props {
@@ -8,22 +9,42 @@ interface Step4Props {
   errors: Record<string, string>;
 }
 
-const PROGRAM_LIST = [
-  {
-    id: 'Menjahit',
-    nama: 'Menjahit',
-    hargaFormatted: 'Rp 3.000.000',
-    durasi: '3 Bulan',
-    deskripsi: 'Pelatihan intensif keahlian menjahit, pembuatan pola busana, dan jahit pakaian industri LPK.',
-  }
-];
-
 export default function Step4PilihanPelatihan({
   data,
   onChange,
   errors,
 }: Step4Props) {
-  const selectedPelatihan = PROGRAM_LIST.find((p) => p.id === data.jenis_pelatihan) || PROGRAM_LIST[0];
+  const [programList, setProgramList] = useState<ProgramPelatihan[]>([]);
+  const [tempatList, setTempatList] = useState<TempatPelatihan[]>([]);
+
+  useEffect(() => {
+    programsApi.list().then((res) => {
+      if (res.data && res.data.length > 0) {
+        setProgramList(res.data);
+        if (!data.jenis_pelatihan) {
+          onChange('jenis_pelatihan', res.data[0].nama);
+        }
+        if (!data.program_id) {
+          const selectedProgram = res.data.find((program) => program.nama === data.jenis_pelatihan) || res.data[0];
+          onChange('program_id', selectedProgram.id);
+        }
+      }
+    }).catch(() => {});
+
+    tempatApi.list().then((res) => {
+      if (res.data && res.data.length > 0) {
+        setTempatList(res.data);
+        if (!data.tempat_pelatihan) {
+          const firstLabel = `${res.data[0].nama_tempat} (${res.data[0].alamat_lengkap})`;
+          onChange('tempat_pelatihan' as keyof PendaftarFormData, firstLabel);
+        }
+      }
+    }).catch(() => {});
+  }, []);
+
+  const selectedPelatihan = programList.find(
+    (p) => p.nama === data.jenis_pelatihan || p.id === data.jenis_pelatihan
+  ) || programList[0];
 
   return (
     <div className="animate-slide-right">
@@ -48,14 +69,24 @@ export default function Step4PilihanPelatihan({
         <select
           id="jenis_pelatihan"
           className={`form-input cursor-pointer font-medium ${errors.jenis_pelatihan ? 'error' : ''}`}
-          value={data.jenis_pelatihan || 'Menjahit'}
-          onChange={(e) => onChange('jenis_pelatihan', e.target.value)}
+          value={data.jenis_pelatihan || ''}
+          onChange={(e) => {
+            const selectedProgram = programList.find((program) => program.nama === e.target.value);
+            onChange('jenis_pelatihan', e.target.value);
+            if (selectedProgram) {
+              onChange('program_id', selectedProgram.id);
+            }
+          }}
         >
-          {PROGRAM_LIST.map((pelatihan) => (
-            <option key={pelatihan.id} value={pelatihan.id}>
-              {pelatihan.nama} — {pelatihan.hargaFormatted} ({pelatihan.durasi})
-            </option>
-          ))}
+          {programList.length === 0 ? (
+            <option value="">-- Memuat Program Pelatihan... --</option>
+          ) : (
+            programList.map((pelatihan) => (
+              <option key={pelatihan.id} value={pelatihan.nama}>
+                {pelatihan.nama} — {pelatihan.harga_formatted || `Rp ${pelatihan.harga.toLocaleString('id-ID')}`} ({pelatihan.durasi})
+              </option>
+            ))
+          )}
         </select>
         {errors.jenis_pelatihan && (
           <span className="form-error">{errors.jenis_pelatihan}</span>
@@ -74,7 +105,9 @@ export default function Step4PilihanPelatihan({
           <div className="flex-1 min-w-0">
             <div className="flex items-center justify-between gap-2 flex-wrap mb-1">
               <h3 className="font-bold text-[var(--text-primary)] text-sm">{selectedPelatihan.nama}</h3>
-              <span className="text-sm font-extrabold text-indigo-700">{selectedPelatihan.hargaFormatted}</span>
+              <span className="text-sm font-extrabold text-indigo-700">
+                {selectedPelatihan.harga_formatted || `Rp ${selectedPelatihan.harga.toLocaleString('id-ID')}`}
+              </span>
             </div>
             <p className="text-xs text-[var(--text-secondary)] leading-relaxed mb-2">{selectedPelatihan.deskripsi}</p>
             <div className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-500">
@@ -99,10 +132,18 @@ export default function Step4PilihanPelatihan({
           value={data.tempat_pelatihan || ''}
           onChange={(e) => onChange('tempat_pelatihan' as keyof PendaftarFormData, e.target.value)}
         >
-          <option value="">-- Pilih Tempat Pelatihan --</option>
-          <option value="Gedung LPK Leles Utama (Jl. Raya Leles No. 45, Garut)">Gedung LPK Leles Utama (Jl. Raya Leles No. 45, Garut)</option>
-          <option value="Workshop Menjahit Leles (Jl. Al-Kautsar No. 12, Leles)">Workshop Menjahit Leles (Jl. Al-Kautsar No. 12, Leles)</option>
-          <option value="Kampus Cabang Garut Kota (Jl. Ahmad Yani No. 88, Garut)">Kampus Cabang Garut Kota (Jl. Ahmad Yani No. 88, Garut)</option>
+          {tempatList.length === 0 ? (
+            <option value="">-- Memuat Tempat Pelatihan... --</option>
+          ) : (
+            tempatList.map((t) => {
+              const fullLabel = `${t.nama_tempat} (${t.alamat_lengkap})`;
+              return (
+                <option key={t.id} value={fullLabel}>
+                  {fullLabel}
+                </option>
+              );
+            })
+          )}
         </select>
         {errors.tempat_pelatihan && (
           <span className="form-error">{errors.tempat_pelatihan}</span>

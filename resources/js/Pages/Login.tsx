@@ -35,7 +35,7 @@ export default function LoginPage() {
     try {
       // 1. Kirim request login ke Backend API
       const res = await authApi.login({ email: cleanIdentifier, password: cleanPassword });
-      
+
       if (res.success && res.data) {
         const data = res.data as any;
         const token = data.token || data.access_token;
@@ -46,7 +46,7 @@ export default function LoginPage() {
         }
         if (user) {
           localStorage.setItem('user', JSON.stringify(user));
-          
+
           // Deteksi role secara otomatis di bagian belakang (behind-the-scenes)
           const role = (user.role || '').toUpperCase();
 
@@ -129,7 +129,7 @@ export default function LoginPage() {
                 Selamat Datang
               </h1>
               <p className="text-xs md:text-sm text-[var(--text-secondary)] font-normal">
-                Masuk untuk mengakses layanan portal LPK
+                Masuk menggunakan akun yang dibuat saat pendaftaran untuk mengakses portal LPK
               </p>
             </div>
 
@@ -230,8 +230,7 @@ export default function LoginPage() {
 
               <button
                 type="submit"
-                className="w-full h-11 rounded-xl text-white font-medium text-sm shadow-lg shadow-blue-900/20 hover:shadow-xl hover:shadow-blue-900/30 active:scale-[0.99] transition-all flex items-center justify-center gap-2"
-                style={{ background: 'linear-gradient(135deg, #1a365d 0%, #2b6cb0 100%)' }}
+                className="w-full h-11 rounded-xl text-white font-medium text-sm shadow-lg shadow-blue-900/20 hover:shadow-xl hover:shadow-blue-900/30 active:scale-[0.99] transition-all flex items-center justify-center gap-2 bg-[#1a365d] hover:bg-[#2b6cb0]"
                 disabled={isLoading}
               >
                 {isLoading ? (

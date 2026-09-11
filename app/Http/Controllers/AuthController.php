@@ -1,0 +1,141 @@
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Http\Controllers\Controller;
+use App\Models\User;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Hash;
+
+class AuthController extends Controller
+{
+    public function login(Request $request)
+    {
+        $request->validate([
+            'email'    => 'required|string',
+            'password' => 'required|string',
+        ]);
+
+        $identifier = trim($request->email);
+
+        $user = User::where('email', $identifier)
+            ->orWhere('username', $identifier)
+            ->first();
+
+        if (! $user || ! Hash::check($request->password, $user->password)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Email/Username atau password yang Anda masukkan salah.',
+            ], 401);
+        }
+
+        // Web session auth (agar auth()->user() di Inertia route bekerja)
+        Auth::login($user, $request->boolean('remember'));
+
+        // Regenerate session token
+        if ($request->hasSession()) {
+            $request->session()->regenerate();
+        }
+
+        // Token Sanctum untuk request API
+        $token = $user->createToken('api-token')->plainTextToken;
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Login berhasil.',
+            'token'   => $token,
+            'user'    => $user->load('pendaftar'),
+        ]);
+    }
+
+    public function logout(Request $request)
+    {
+        $user = $request->user() ?? auth()->user();
+
+        if ($user && method_exists($user, 'currentAccessToken') && $user->currentAccessToken()) {
+            $user->currentAccessToken()->delete();
+        }
+
+        Auth::logout();
+
+        if ($request->hasSession()) {
+            $request->session()->invalidate();
+            $request->session()->regenerateToken();
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Logout berhasil.',
+        ]);
+    }
+
+    public function me(Request $request)
+    {
+        $user = $request->user() ?? auth()->user();
+
+        if (! $user) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthenticated.',
+            ], 401);
+        }
+
+        return response()->json([
+            'success' => true,
+            'data'    => $user->load('pendaftar'),
+        ]);
+    }
+
+    public function refresh(Request $request)
+    {
+        $user = $request->user() ?? auth()->user();
+
+        if (! $user) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthenticated.',
+            ], 401);
+        }
+
+        $token = $user->createToken('api-token')->plainTextToken;
+
+        return response()->json([
+            'success' => true,
+            'token'   => $token,
+        ]);
+    }
+
+    public function changePassword(Request $request)
+    {
+        $user = $request->user() ?? auth()->user();
+
+        if (! $user) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthenticated.',
+            ], 401);
+        }
+
+        $request->validate([
+            'password_lama' => 'required|string',
+            'password_baru' => 'required|string|min:6',
+        ]);
+
+        if (! Hash::check($request->password_lama, $user->password)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Password lama salah.',
+            ], 422);
+        }
+
+        $user->update([
+            'password' => Hash::make($request->password_baru),
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Password berhasil diubah.',
+        ]);
+    }
+}

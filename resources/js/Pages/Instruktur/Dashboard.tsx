@@ -5,8 +5,9 @@ import { router } from '@inertiajs/react';
 import Navbar from '@/Components/Navbar';
 import CalendarView from '@/Components/CalendarView';
 import AttendanceTracker from '@/Components/AttendanceTracker';
-import { JENIS_PELATIHAN, type JadwalPelatihan, type Pendaftar } from '@/lib/storage';
-import { jadwalApi, pendaftarApi } from '@/lib/api';
+import { type JadwalPelatihan, type Pendaftar } from '@/lib/storage';
+import { jadwalApi, pendaftarApi, programsApi } from '@/lib/api';
+import type { ProgramPelatihan } from '@/lib/types';
 
 type InstrukturTab = 'jadwal' | 'presensi' | 'peserta' | 'materi';
 
@@ -15,28 +16,37 @@ export default function InstrukturDashboardPage() {
   const [activeTab, setActiveTab] = useState<InstrukturTab>('jadwal');
   const [jadwalList, setJadwalList] = useState<JadwalPelatihan[]>([]);
   const [pendaftarList, setPendaftarList] = useState<Pendaftar[]>([]);
+  const [programList, setProgramList] = useState<ProgramPelatihan[]>([]);
   const [selectedProgramFilter, setSelectedProgramFilter] = useState('Semua');
 
   // Material upload state
   const [materiJudul, setMateriJudul] = useState('');
-  const [materiProgram, setMateriProgram] = useState('Bahasa Jepang');
+  const [materiProgram, setMateriProgram] = useState('');
   const [materiSuccess, setMateriSuccess] = useState(false);
 
   const loadData = useCallback(async () => {
     try {
-      const jadwalRes = await jadwalApi.list();
+      const [jadwalRes, pendaftarRes, progRes] = await Promise.all([
+        jadwalApi.list(),
+        pendaftarApi.list(),
+        programsApi.list(),
+      ]);
       setJadwalList(jadwalRes.data || []);
-      const pendaftarRes = await pendaftarApi.list();
       const allPendaftar = pendaftarRes.data?.data || [];
       setPendaftarList(allPendaftar.filter((p: Pendaftar) => p.status === 'diterima'));
+      const progs = progRes.data || [];
+      setProgramList(progs);
+      if (progs.length > 0 && !materiProgram) {
+        setMateriProgram(progs[0].nama);
+      }
     } catch (error) {
       console.error('Error loading data:', error);
     }
-  }, []);
+  }, [materiProgram]);
 
   useEffect(() => {
     if (sessionStorage.getItem('lpk_instruktur_logged_in') !== 'true') {
-      router.push('/instruktur');
+      router.visit('/login');
       return;
     }
     setIsAuthed(true);
@@ -45,7 +55,7 @@ export default function InstrukturDashboardPage() {
 
   const handleLogout = () => {
     sessionStorage.removeItem('lpk_instruktur_logged_in');
-    router.push('/instruktur');
+    router.visit('/login');
   };
 
   const handleUploadMateri = (e: React.FormEvent) => {
@@ -164,8 +174,8 @@ export default function InstrukturDashboardPage() {
                       className="form-input text-xs w-auto"
                     >
                       <option value="Semua">Semua Program</option>
-                      {JENIS_PELATIHAN.map((p) => (
-                        <option key={p} value={p}>{p}</option>
+                      {programList.map((p) => (
+                        <option key={p.id} value={p.nama}>{p.nama}</option>
                       ))}
                     </select>
                   </div>
@@ -185,8 +195,8 @@ export default function InstrukturDashboardPage() {
                     className="form-input text-xs w-auto"
                   >
                     <option value="Semua">Semua Program</option>
-                    {JENIS_PELATIHAN.map((p) => (
-                      <option key={p} value={p}>{p}</option>
+                    {programList.map((p) => (
+                      <option key={p.id} value={p.nama}>{p.nama}</option>
                     ))}
                   </select>
                 </div>
@@ -219,7 +229,6 @@ export default function InstrukturDashboardPage() {
                             </td>
                             <td className="font-bold text-slate-800 text-xs">{p.nama_lengkap}</td>
                             <td className="text-xs font-semibold text-slate-700">{p.jenis_pelatihan}</td>
-                            <td className="text-xs text-slate-600">{p.jenis_kelamin}</td>
                             <td className="whitespace-nowrap">
                               <div className="text-xs font-mono font-bold text-slate-800">{p.no_hp}</div>
                               <div className="text-[11px] text-slate-500">{p.email}</div>
@@ -255,8 +264,8 @@ export default function InstrukturDashboardPage() {
                       onChange={(e) => setMateriProgram(e.target.value)}
                       className="form-input"
                     >
-                      {JENIS_PELATIHAN.map((p) => (
-                        <option key={p} value={p}>{p}</option>
+                      {programList.map((p) => (
+                        <option key={p.id} value={p.nama}>{p.nama}</option>
                       ))}
                     </select>
                   </div>

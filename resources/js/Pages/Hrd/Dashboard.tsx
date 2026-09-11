@@ -41,7 +41,7 @@ export default function HrdDashboardPage() {
 
   useEffect(() => {
     if (sessionStorage.getItem('lpk_hrd_logged_in') !== 'true') {
-      router.push('/hrd');
+      router.visit('/login');
       return;
     }
     setIsAuthed(true);
@@ -50,7 +50,7 @@ export default function HrdDashboardPage() {
 
   const handleLogout = () => {
     sessionStorage.removeItem('lpk_hrd_logged_in');
-    router.push('/hrd');
+    router.visit('/login');
   };
 
   const handleScheduleSubmit = async (e: React.FormEvent) => {
@@ -191,14 +191,34 @@ export default function HrdDashboardPage() {
                 ))}
               </div>
 
-              <div className="w-full md:w-72">
+              <div className="relative flex items-center w-full md:w-72">
+                <span className="absolute left-3.5 pointer-events-none text-slate-400 z-10 flex items-center justify-center">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="11" cy="11" r="8" />
+                    <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                  </svg>
+                </span>
                 <input
                   type="text"
                   placeholder="Cari nama, NIK, no reg..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="form-input text-xs"
+                  style={{ paddingLeft: '2.5rem', paddingRight: searchQuery ? '2.25rem' : '0.875rem' }}
+                  className="form-input text-xs h-9 w-full font-medium bg-slate-50/80 focus:bg-white border-slate-200 focus:border-indigo-500 rounded-xl transition-all shadow-2xs"
                 />
+                {searchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchQuery('')}
+                    className="absolute right-2.5 text-slate-400 hover:text-slate-600 p-0.5 rounded-full hover:bg-slate-200/60 transition-colors z-10"
+                    title="Bersihkan pencarian"
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <line x1="18" y1="6" x2="6" y2="18" />
+                      <line x1="6" y1="6" x2="18" y2="18" />
+                    </svg>
+                  </button>
+                )}
               </div>
             </div>
 

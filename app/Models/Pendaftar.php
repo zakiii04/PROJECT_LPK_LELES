@@ -20,17 +20,14 @@ class Pendaftar extends Model
         'nik',
         'tempat_lahir',
         'tanggal_lahir',
-        'jenis_kelamin',
         'alamat',
         'tinggi_badan',
         'berat_badan',
         'lingkar_pinggang',
         'riwayat_penyakit',
+        'berkas_verifikasi',
         'no_hp',
         'email',
-        'nama_kontak_darurat',
-        'no_hp_kontak_darurat',
-        'hubungan_kontak_darurat',
         'jenis_pelatihan',
         'program_id',
         'tempat_pelatihan',
@@ -49,7 +46,26 @@ class Pendaftar extends Model
         'tanggal_daftar' => 'datetime',
         'tanggal_lahir' => 'date',
         'tanggal_bayar' => 'datetime',
+        'berkas_verifikasi' => 'array',
     ];
+
+    protected static function booted()
+    {
+        static::updating(function ($pendaftar) {
+            if ($pendaftar->isDirty('status') && $pendaftar->status !== 'diterima') {
+                $pendaftar->jadwal()->detach();
+            }
+            if ($pendaftar->isDirty('angkatan_id') && !empty($pendaftar->getOriginal('angkatan_id'))) {
+                $oldAngkatanId = $pendaftar->getOriginal('angkatan_id');
+                if ($oldAngkatanId !== $pendaftar->angkatan_id) {
+                    $oldJadwals = $pendaftar->jadwal()->where('angkatan_id', $oldAngkatanId)->pluck('jadwal_pelatihans.id');
+                    if ($oldJadwals->count() > 0) {
+                        $pendaftar->jadwal()->detach($oldJadwals);
+                    }
+                }
+            }
+        });
+    }
 
     public function user()
     {

@@ -73,9 +73,7 @@ export default function Step3KontakDarurat({
         </div>
       </div>
 
-      {/* Kontak Darurat Section */}
       
-        
     
     </div>
   );

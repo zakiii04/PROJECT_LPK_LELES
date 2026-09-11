@@ -23,12 +23,6 @@ export type {
   HasilUjian,
 } from '@/lib/types';
 
-// --- Constants ---
-
-export const JENIS_PELATIHAN = [
-  'Menjahit',
-] as const;
-
 // --- Status Label Helpers ---
 
 export function getStatusLabel(status: PendaftarStatus): string {
@@ -67,16 +61,47 @@ export function getStatusPembayaranBadgeClass(status?: StatusPembayaran | null):
 
 // --- Address Composer ---
 
-export function composeAlamat(data: Partial<PendaftarFormData>): string {
-  const rtRw = [data.rt, data.rw].filter(Boolean).join('/');
+export function composeAlamat(data: {
+  provinsi?: string;
+  kabupaten_kota?: string;
+  kecamatan?: string;
+  desa_kelurahan?: string;
+  detail_alamat?: string;
+}): string {
   const parts = [
     data.provinsi?.trim(),
     data.kabupaten_kota?.trim(),
     data.kecamatan?.trim(),
     data.desa_kelurahan?.trim(),
-    rtRw ? `RT/RW ${rtRw}` : '',
   ].filter(Boolean);
+
+  if (data.detail_alamat?.trim()) {
+    parts.push(data.detail_alamat.trim());
+  }
+
   return parts.join(', ');
+}
+
+export function parseAlamat(alamatStr: string): {
+  provinsi?: string;
+  kabupaten_kota?: string;
+  kecamatan?: string;
+  desa_kelurahan?: string;
+  detail_alamat?: string;
+} {
+  if (!alamatStr) return {};
+  const parts = alamatStr.split(',').map((p) => p.trim()).filter(Boolean);
+
+  if (parts.length === 0) return {};
+  if (parts.length === 1) return { detail_alamat: parts[0] };
+
+  return {
+    provinsi: parts[0] || '',
+    kabupaten_kota: parts[1] || '',
+    kecamatan: parts[2] || '',
+    desa_kelurahan: parts[3] || '',
+    detail_alamat: parts.length > 4 ? parts.slice(4).join(', ') : '',
+  };
 }
 
 // --- Form Data Mapper (camelCase form → snake_case API) ---
@@ -87,17 +112,13 @@ export function formToApiPayload(form: PendaftarFormData) {
     nik: form.nik,
     tempat_lahir: form.tempat_lahir,
     tanggal_lahir: form.tanggal_lahir,
-    jenis_kelamin: form.jenis_kelamin,
-    alamat: composeAlamat(form),
+    alamat: form.alamat_lengkap.trim() || composeAlamat(form),
     tinggi_badan: form.tinggi_badan,
     berat_badan: form.berat_badan,
     lingkar_pinggang: form.lingkar_pinggang,
     riwayat_penyakit: form.riwayat_penyakit,
     no_hp: form.no_hp,
     email: form.email,
-    nama_kontak_darurat: form.nama_kontak_darurat,
-    no_hp_kontak_darurat: form.no_hp_kontak_darurat,
-    hubungan_kontak_darurat: form.hubungan_kontak_darurat,
     jenis_pelatihan: form.jenis_pelatihan,
     program_id: form.program_id,
     motivasi: form.motivasi,

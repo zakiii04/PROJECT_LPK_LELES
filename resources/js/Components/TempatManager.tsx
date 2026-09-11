@@ -5,8 +5,12 @@ import { tempatApi } from '@/lib/api';
 import type { TempatPelatihan } from '@/lib/types';
 import DeleteConfirmModal from '@/Components/DeleteConfirmModal';
 
-export default function TempatManager() {
-  const [tempatList, setTempatList] = useState<TempatPelatihan[]>([]);
+interface TempatManagerProps {
+  initialTempatList?: TempatPelatihan[];
+}
+
+export default function TempatManager({ initialTempatList = [] }: TempatManagerProps) {
+  const [tempatList, setTempatList] = useState<TempatPelatihan[]>(initialTempatList);
   const [showModal, setShowModal] = useState(false);
   const [editingTempat, setEditingTempat] = useState<TempatPelatihan | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
@@ -28,8 +32,12 @@ export default function TempatManager() {
   }, []);
 
   useEffect(() => {
-    loadData();
-  }, [loadData]);
+    if (initialTempatList.length > 0) {
+      setTempatList(initialTempatList);
+    } else {
+      loadData();
+    }
+  }, [initialTempatList]);
 
   const handleOpenAddModal = () => {
     setEditingTempat(null);

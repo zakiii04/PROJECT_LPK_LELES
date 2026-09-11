@@ -50,7 +50,7 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-sans: 'Manrope', system-ui, -apple-system, sans-serif;
   --font-mono: monospace;
 }
 
@@ -60,12 +60,13 @@
 
 html {
   scroll-behavior: smooth;
+  font-family: 'Manrope', system-ui, -apple-system, sans-serif;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  font-family: 'Manrope', system-ui, -apple-system, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -209,6 +210,13 @@ body {
 .btn-ghost:hover:not(:disabled) {
   background: var(--surface);
   color: var(--text-primary);
+}
+
+.btn-xs {
+  padding: 4px 8px;
+  font-size: 0.72rem;
+  border-radius: 6px;
+  gap: 4px;
 }
 
 .btn-sm {
@@ -943,4 +951,60 @@ textarea.form-input {
 
 .sidebar-link.active .icon-box {
   color: #15803d;
+}
+
+/* ─── PRINT STYLES — Absensi & Penilaian ─────────────────── */
+@media print {
+  /* Hide everything except the print area */
+  body * {
+    visibility: hidden !important;
+  }
+
+  #print-absensi,
+  #print-absensi * {
+    visibility: visible !important;
+  }
+
+  #print-absensi {
+    position: fixed !important;
+    inset: 0 !important;
+    width: 100% !important;
+    background: white !important;
+    padding: 10mm !important;
+    font-size: 10pt !important;
+    color: black !important;
+    overflow: visible !important;
+  }
+
+  /* Landscape A4 */
+  @page {
+    size: A4 landscape;
+    margin: 8mm 10mm;
+  }
+
+  /* Table borders must print */
+  #print-absensi table,
+  #print-absensi th,
+  #print-absensi td {
+    border-color: black !important;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+
+  /* No background gradients in print */
+  #print-absensi .bg-gray-100,
+  #print-absensi .bg-gray-50 {
+    background-color: #f3f4f6 !important;
+  }
+
+  /* Prevent row breaks inside a peserta row */
+  #print-absensi tbody tr {
+    page-break-inside: avoid;
+  }
+
+  /* Footer signatures */
+  #print-absensi .mt-8 {
+    margin-top: 12mm !important;
+    page-break-inside: avoid;
+  }
 }
