@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { tempatApi } from '@/lib/api';
 import type { TempatPelatihan } from '@/lib/types';
 import DeleteConfirmModal from '@/Components/DeleteConfirmModal';
+import ActionToast, { useActionToast } from '@/Components/ActionToast';
 
 interface TempatManagerProps {
   initialTempatList?: TempatPelatihan[];
@@ -14,6 +15,9 @@ export default function TempatManager({ initialTempatList = [] }: TempatManagerP
   const [showModal, setShowModal] = useState(false);
   const [editingTempat, setEditingTempat] = useState<TempatPelatihan | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
+  const { actionToast, showLoading, showSuccess, showError, hideToast } = useActionToast();
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // Form states
   const [namaTempat, setNamaTempat] = useState('');
@@ -63,6 +67,14 @@ export default function TempatManager({ initialTempatList = [] }: TempatManagerP
     e.preventDefault();
     if (!namaTempat || !alamatLengkap) return;
 
+    setIsSubmitting(true);
+    const isEdit = Boolean(editingTempat);
+    showLoading(
+      isEdit ? 'edit' : 'add',
+      isEdit ? 'Memperbarui Tempat Pelatihan...' : 'Menambahkan Tempat Baru...',
+      'Sedang memproses dan menyimpan ke sistem...'
+    );
+
     try {
       const payload = {
         nama_tempat: namaTempat,
@@ -78,10 +90,19 @@ export default function TempatManager({ initialTempatList = [] }: TempatManagerP
         await tempatApi.create(payload);
       }
 
+      const savedName = namaTempat;
       setShowModal(false);
-      loadData();
-    } catch (err) {
+      await loadData();
+      showSuccess(
+        isEdit ? 'edit' : 'add',
+        isEdit ? 'Tempat Pelatihan Berhasil Diperbarui!' : 'Tempat Pelatihan Baru Berhasil Ditambahkan!',
+        `Lokasi "${savedName}" telah tersimpan.`
+      );
+    } catch (err: any) {
       console.error('Error saving tempat pelatihan:', err);
+      showError('Gagal Menyimpan Tempat', err?.message || 'Terjadi kesalahan sistem.');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -91,12 +112,21 @@ export default function TempatManager({ initialTempatList = [] }: TempatManagerP
 
   const confirmDelete = async () => {
     if (!deleteTarget) return;
+
+    setIsDeleting(true);
+    showLoading('delete', `Menghapus ${deleteTarget.name}...`, 'Sedang menghapus lokasi dari sistem...');
+
     try {
       await tempatApi.destroy(deleteTarget.id);
+      const deletedName = deleteTarget.name;
       setDeleteTarget(null);
-      loadData();
-    } catch (err) {
+      await loadData();
+      showSuccess('delete', 'Tempat Pelatihan Berhasil Dihapus!', `"${deletedName}" telah dihapus.`);
+    } catch (err: any) {
       console.error('Error deleting tempat pelatihan:', err);
+      showError('Gagal Menghapus Tempat', err?.message || 'Terjadi kesalahan saat menghapus.');
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -195,13 +225,23 @@ export default function TempatManager({ initialTempatList = [] }: TempatManagerP
 
       {/* Modal Form Tambah/Edit Tempat */}
       {showModal && (
-        <div className="modal-overlay" onClick={() => setShowModal(false)}>
-          <div className="modal-content max-w-lg p-6" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-overlay" onClick={() => { if (!isSubmitting) setShowModal(false); }}>
+          <div className="modal-content relative max-w-lg p-6 overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            {isSubmitting && (
+              <div className="absolute top-0 left-0 right-0 h-1 bg-indigo-100 overflow-hidden">
+                <div className="h-full bg-gradient-to-r from-blue-600 via-indigo-500 to-blue-600 animate-progress-infinite" />
+              </div>
+            )}
             <div className="flex justify-between items-center pb-3 border-b border-slate-100 mb-4">
               <h3 className="font-bold text-slate-800 text-sm">
                 {editingTempat ? 'Edit Tempat Pelatihan' : 'Tambah Tempat Pelatihan Baru'}
               </h3>
-              <button onClick={() => setShowModal(false)} className="text-slate-400 hover:text-black">
+              <button
+                type="button"
+                disabled={isSubmitting}
+                onClick={() => setShowModal(false)}
+                className="text-slate-400 hover:text-black disabled:opacity-40"
+              >
                 ✕
               </button>
             </div>
@@ -262,11 +302,25 @@ export default function TempatManager({ initialTempatList = [] }: TempatManagerP
               </div>
 
               <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
-                <button type="button" onClick={() => setShowModal(false)} className="btn btn-outline btn-sm">
+                <button
+                  type="button"
+                  disabled={isSubmitting}
+                  onClick={() => setShowModal(false)}
+                  className="btn btn-outline btn-sm disabled:opacity-50"
+                >
                   Batal
                 </button>
-                <button type="submit" className="btn btn-primary btn-sm">
-                  {editingTempat ? 'Simpan Perubahan' : 'Tambah Tempat'}
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="btn btn-primary btn-sm flex items-center gap-1.5 disabled:opacity-75 disabled:cursor-not-allowed"
+                >
+                  {isSubmitting && (
+                    <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  )}
+                  {isSubmitting
+                    ? (editingTempat ? 'Memperbarui...' : 'Menyimpan...')
+                    : (editingTempat ? 'Simpan Perubahan' : 'Tambah Tempat')}
                 </button>
               </div>
             </form>
@@ -279,9 +333,14 @@ export default function TempatManager({ initialTempatList = [] }: TempatManagerP
         title="Hapus Tempat Pelatihan?"
         message="Anda yakin ingin menghapus lokasi tempat pelatihan"
         itemName={deleteTarget?.name || null}
+        loading={isDeleting}
         onConfirm={confirmDelete}
-        onCancel={() => setDeleteTarget(null)}
+        onCancel={() => {
+          if (!isDeleting) setDeleteTarget(null);
+        }}
       />
+
+      <ActionToast toast={actionToast} onClose={hideToast} />
     </div>
   );
 }

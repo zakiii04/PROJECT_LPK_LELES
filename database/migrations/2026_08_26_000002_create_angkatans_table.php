@@ -19,7 +19,6 @@ return new class extends Migration
             $table->dateTime('tanggal_mulai');
             $table->dateTime('tanggal_selesai');
             $table->integer('kuota')->default(30);
-            $table->string('instruktur_nama');
             $table->enum('status', ['Pendaftaran', 'On_Going', 'Selesai', 'Mendatang'])->default('Pendaftaran');
             $table->timestamps(); // created_at
             $table->string('program_id');

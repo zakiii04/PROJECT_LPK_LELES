@@ -35,7 +35,6 @@ class AngkatanController extends Controller
             'tanggal_mulai'           => 'required|date',
             'tanggal_selesai'         => 'required|date',
             'kuota'                   => 'sometimes|integer|min:1',
-            'instruktur_nama'         => 'required|string',
             'status'                  => 'sometimes|in:Pendaftaran,On_Going,Selesai,Mendatang',
             'program_id'              => 'required|string',
         ]);
@@ -67,7 +66,6 @@ class AngkatanController extends Controller
             'tanggal_mulai'           => 'sometimes|date',
             'tanggal_selesai'         => 'sometimes|date',
             'kuota'                   => 'sometimes|integer|min:1',
-            'instruktur_nama'         => 'sometimes|string',
             'status'                  => 'sometimes|in:Pendaftaran,On_Going,Selesai,Mendatang',
             'program_id'              => 'sometimes|nullable|string',
         ]);

@@ -155,6 +155,14 @@ export default function PesertaDashboardPage(props: PesertaDashboardProps) {
   const totalHargaFormatted =
     program?.harga_formatted ||
     (totalBiayaPelatihan > 0 ? `Rp ${totalBiayaPelatihan.toLocaleString('id-ID')}` : 'Rp 0');
+  const tagihanNominal = Number(pendaftar.tagihan?.nominal || totalBiayaPelatihan);
+  const pembayaranBaru = pendaftar.tagihan?.pembayarans || [];
+  const pembayaranDiterima = pembayaranBaru.filter((payment) => payment.status === 'diterima');
+  const pembayaranMenunggu = pembayaranBaru.filter((payment) => payment.status === 'menunggu_verifikasi');
+  const totalDibayarBaru = pembayaranDiterima.reduce((sum, payment) => sum + Number(payment.nominal || 0), 0);
+  const sisaTagihanBaru = Math.max(0, tagihanNominal - totalDibayarBaru);
+  const statusTagihanBaru = pendaftar.tagihan?.status === 'lunas' || sisaTagihanBaru <= 0 ? 'lunas' : 'belum_lunas';
+  const progressTagihanBaru = tagihanNominal > 0 ? Math.min(100, (totalDibayarBaru / tagihanNominal) * 100) : 0;
   const filteredJadwal = jadwalList.filter((j) => {
     // 1. Jadwal harus sesuai dengan angkatan peserta saat ini (mencegah jadwal angkatan lama tampil)
     if (pendaftar.angkatan_id && j.angkatan_id && j.angkatan_id !== pendaftar.angkatan_id) {
@@ -502,8 +510,55 @@ export default function PesertaDashboardPage(props: PesertaDashboardProps) {
                 </div>
               </div>
 
+              <div className="p-6 rounded-2xl bg-white border border-[var(--card-border)] space-y-5">
+                <div className="flex items-center justify-between gap-4 flex-wrap">
+                  <div>
+                    <div className="text-xs text-slate-500">Status Tagihan</div>
+                    <div className={`text-lg font-extrabold ${statusTagihanBaru === 'lunas' ? 'text-emerald-600' : 'text-amber-600'}`}>
+                      {statusTagihanBaru === 'lunas' ? 'LUNAS' : 'BELUM LUNAS'}
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-xs text-slate-500">Sisa Tagihan</div>
+                    <div className="text-xl font-extrabold text-indigo-600">Rp {sisaTagihanBaru.toLocaleString('id-ID', { maximumFractionDigits: 0 })}</div>
+                  </div>
+                </div>
+                <div>
+                  <div className="flex justify-between text-[11px] font-semibold text-slate-500 mb-1">
+                    <span>Terbayar Rp {totalDibayarBaru.toLocaleString('id-ID', { maximumFractionDigits: 0 })}</span>
+                    <span>{Math.round(progressTagihanBaru)}%</span>
+                  </div>
+                  <div className="h-2.5 rounded-full bg-slate-100 overflow-hidden">
+                    <div className="h-full rounded-full bg-emerald-500 transition-all" style={{ width: `${progressTagihanBaru}%` }} />
+                  </div>
+                </div>
+                {pembayaranMenunggu.length > 0 && (
+                  <div className="p-3 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-800">
+                    {pembayaranMenunggu.length} pembayaran sedang menunggu validasi admin.
+                  </div>
+                )}
+                {statusTagihanBaru !== 'lunas' && (
+                  <button onClick={() => setShowPaymentModal(true)} className="btn btn-primary btn-md w-full font-bold">
+                    Bayar Tagihan / Cicilan
+                  </button>
+                )}
+                {pembayaranBaru.length > 0 && (
+                  <div className="space-y-2 border-t border-slate-100 pt-4">
+                    <div className="text-xs font-bold text-slate-700">Riwayat Pembayaran</div>
+                    {pembayaranBaru.slice().reverse().map((payment) => (
+                      <div key={payment.id} className="flex items-center justify-between gap-3 text-xs p-2.5 rounded-lg bg-slate-50">
+                        <span className="font-semibold capitalize">{payment.tipe_pembayaran} • Rp {Number(payment.nominal).toLocaleString('id-ID', { maximumFractionDigits: 0 })}</span>
+                        <span className={payment.status === 'diterima' ? 'text-emerald-600' : payment.status === 'ditolak' ? 'text-red-600' : 'text-amber-600'}>
+                          {payment.status === 'diterima' ? 'Diterima' : payment.status === 'ditolak' ? 'Ditolak' : 'Menunggu Validasi'}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
               {/* If Belum Bayar */}
-              {(!pendaftar.status_pembayaran || pendaftar.status_pembayaran === 'belum_bayar') && (
+              {false && (!pendaftar.status_pembayaran || pendaftar.status_pembayaran === 'belum_bayar') && (
                 <div className="p-6 rounded-2xl bg-[var(--primary-bg)] border border-[rgba(26,54,93,0.15)] flex flex-col md:flex-row items-center justify-between gap-4">
                   <div>
                     <h3 className="font-bold text-[var(--primary)] text-base mb-1">
@@ -527,7 +582,7 @@ export default function PesertaDashboardPage(props: PesertaDashboardProps) {
               )}
 
               {/* If Menunggu Konfirmasi (bayar lunas) */}
-              {pendaftar.status_pembayaran === 'menunggu_konfirmasi' && (
+              {false && pendaftar.status_pembayaran === 'menunggu_konfirmasi' && (
                 <div className="p-6 rounded-2xl bg-[var(--warning-bg)] border border-[rgba(221,107,32,0.2)] space-y-3">
                   <div className="flex items-center gap-3">
                     <div className="w-10 h-10 rounded-full bg-amber-500/20 text-amber-600 flex items-center justify-center font-bold text-lg">
@@ -558,7 +613,7 @@ export default function PesertaDashboardPage(props: PesertaDashboardProps) {
               )}
 
               {/* If Cicilan Sebagian — NEW */}
-              {pendaftar.status_pembayaran === 'cicilan_sebagian' && (() => {
+              {false && pendaftar.status_pembayaran === 'cicilan_sebagian' && (() => {
                 const cicilanList: Cicilan[] = pendaftar.cicilan || [];
                 const summary = getCicilanSummary(pendaftar);
 
@@ -677,7 +732,7 @@ export default function PesertaDashboardPage(props: PesertaDashboardProps) {
               })()}
 
               {/* If Lunas */}
-              {pendaftar.status_pembayaran === 'lunas' && (
+              {false && pendaftar.status_pembayaran === 'lunas' && (
                 <div className="p-6 rounded-2xl bg-[var(--accent-bg)] border border-[rgba(43,108,176,0.2)] space-y-4">
                   <div className="flex items-center justify-between flex-wrap gap-3">
                     <div className="flex items-center gap-3">

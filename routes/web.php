@@ -17,6 +17,7 @@ use App\Http\Controllers\TempatPelatihanController;
 use App\Http\Controllers\PendaftarController;
 use App\Http\Controllers\JadwalPelatihanController;
 use App\Http\Controllers\KelulusanController;
+use App\Http\Controllers\PembayaranController;
 use App\Http\Controllers\AuthController;
 
 // Home Page
@@ -49,7 +50,7 @@ Route::get('/peserta/login', function () {
 // Dashboards — Direct Props (Inertia Server-Side Loaded)
 Route::get('/admin/dashboard', function () {
     return Inertia::render('Admin/Dashboard', [
-        'initialPendaftarList' => Pendaftar::with(['program', 'angkatan', 'user', 'cicilan'])->latest('tanggal_daftar')->get(),
+        'initialPendaftarList' => Pendaftar::with(['program', 'angkatan', 'user', 'cicilan', 'tagihan.pembayarans.paymentMethod'])->latest('tanggal_daftar')->get(),
         'initialJadwalList'    => JadwalPelatihan::with('peserta')->get(),
         'initialSoalList'      => SoalUjian::all(),
         'initialProgramList'   => ProgramPelatihan::all(),
@@ -73,10 +74,10 @@ Route::get('/peserta/dashboard', function () {
     $user = auth()->user();
     $pendaftar = null;
     if ($user) {
-        $pendaftar = Pendaftar::with(['program', 'angkatan', 'user', 'cicilan'])->where('user_id', $user->id)->first();
+        $pendaftar = Pendaftar::with(['program', 'angkatan', 'user', 'cicilan', 'tagihan.pembayarans.paymentMethod'])->where('user_id', $user->id)->first();
     }
     if (!$pendaftar) {
-        $pendaftar = Pendaftar::with(['program', 'angkatan', 'user', 'cicilan'])->latest('tanggal_daftar')->first();
+        $pendaftar = Pendaftar::with(['program', 'angkatan', 'user', 'cicilan', 'tagihan.pembayarans.paymentMethod'])->latest('tanggal_daftar')->first();
     }
 
     $jadwalList = [];
@@ -496,9 +497,12 @@ Route::get('/hasil-ujian', function () {
 });
 
 // Pembayaran routes
-Route::post('/pendaftar/{id}/pembayaran', [PendaftarController::class, 'uploadBuktiPembayaran']);
-Route::patch('/pendaftar/{id}/pembayaran/verifikasi', [PendaftarController::class, 'verifikasiPembayaran']);
-Route::patch('/pendaftar/{id}/pembayaran/tolak', [PendaftarController::class, 'tolakPembayaran']);
+Route::get('/pendaftar/{id}/pembayaran', [PembayaranController::class, 'info']);
+Route::post('/pendaftar/{id}/pembayaran', [PembayaranController::class, 'store']);
+Route::patch('/pendaftar/{id}/pembayaran/verifikasi', [PembayaranController::class, 'verify']);
+Route::patch('/pendaftar/{id}/pembayaran/tolak', [PembayaranController::class, 'reject']);
+Route::patch('/pembayaran/{id}/verifikasi', [PembayaranController::class, 'verifyTransaction']);
+Route::patch('/pembayaran/{id}/tolak', [PembayaranController::class, 'rejectTransaction']);
 
 // Cicilan routes
 Route::get('/pendaftar/{id}/cicilan', [PendaftarController::class, 'getCicilan']);

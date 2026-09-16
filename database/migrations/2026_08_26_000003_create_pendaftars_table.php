@@ -28,12 +28,12 @@ return new class extends Migration
             $table->string('lingkar_pinggang');
             $table->string('riwayat_penyakit')->nullable();
 
-            // Kontak Darurat
+            // Kontak dan pendidikan
             $table->string('no_hp');
             $table->string('email');
-            $table->string('nama_kontak_darurat');
-            $table->string('no_hp_kontak_darurat');
-            $table->string('hubungan_kontak_darurat');
+            $table->string('jenjang_pendidikan')->nullable();
+            $table->string('asal_sekolah')->nullable();
+            $table->unsignedSmallInteger('tahun_lulus')->nullable();
 
             // Pilihan Pelatihan
             $table->string('jenis_pelatihan');

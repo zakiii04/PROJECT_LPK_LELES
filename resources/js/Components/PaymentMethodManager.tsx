@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { paymentMethodApi } from '@/lib/api';
 import type { CreatePaymentMethodPayload, PaymentMethod, PaymentMethodType } from '@/lib/types';
+import DeleteConfirmModal from '@/Components/DeleteConfirmModal';
+import ActionToast, { useActionToast } from '@/Components/ActionToast';
 
 const methodTypeLabels: Record<PaymentMethodType, string> = {
   bank: 'Bank Transfer',
@@ -20,6 +22,9 @@ export default function PaymentMethodManager({ initialPaymentMethods = [] }: Pay
   const [showModal, setShowModal] = useState(false);
   const [editingMethod, setEditingMethod] = useState<PaymentMethod | null>(null);
   const [pendingDelete, setPendingDelete] = useState<{ id: string; name: string } | null>(null);
+  const { actionToast, showLoading, showSuccess, showError, hideToast } = useActionToast();
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const [namaMetode, setNamaMetode] = useState('');
   const [rekening, setRekening] = useState('');
@@ -73,6 +78,14 @@ export default function PaymentMethodManager({ initialPaymentMethods = [] }: Pay
     e.preventDefault();
     if (!namaMetode.trim()) return;
 
+    setIsSubmitting(true);
+    const isEdit = Boolean(editingMethod);
+    showLoading(
+      isEdit ? 'edit' : 'add',
+      isEdit ? 'Memperbarui Metode Pembayaran...' : 'Menambahkan Metode Pembayaran...',
+      'Sedang memproses dan menyimpan ke sistem...'
+    );
+
     const payload: CreatePaymentMethodPayload = {
       nama_metode: namaMetode.trim(),
       rekening: rekening.trim() || undefined,
@@ -89,11 +102,19 @@ export default function PaymentMethodManager({ initialPaymentMethods = [] }: Pay
         await paymentMethodApi.create(payload);
       }
 
+      const savedName = namaMetode;
       setShowModal(false);
       await loadData();
-    } catch (err) {
+      showSuccess(
+        isEdit ? 'edit' : 'add',
+        isEdit ? 'Metode Pembayaran Berhasil Diperbarui!' : 'Metode Pembayaran Baru Berhasil Ditambahkan!',
+        `Metode "${savedName}" telah tersimpan.`
+      );
+    } catch (err: any) {
       console.error('Error saving payment method:', err);
-      alert('Gagal menyimpan metode pembayaran. Mohon cek kembali inputan Anda.');
+      showError('Gagal Menyimpan Metode', err?.message || 'Mohon cek kembali inputan Anda.');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -104,13 +125,20 @@ export default function PaymentMethodManager({ initialPaymentMethods = [] }: Pay
   const confirmDelete = async () => {
     if (!pendingDelete) return;
 
+    setIsDeleting(true);
+    showLoading('delete', `Menghapus ${pendingDelete.name}...`, 'Sedang menghapus metode pembayaran...');
+
     try {
       await paymentMethodApi.destroy(pendingDelete.id);
+      const deletedName = pendingDelete.name;
       setPendingDelete(null);
       await loadData();
-    } catch (err) {
+      showSuccess('delete', 'Metode Pembayaran Berhasil Dihapus!', `"${deletedName}" telah dihapus.`);
+    } catch (err: any) {
       console.error('Error deleting payment method:', err);
-      alert('Gagal menghapus metode pembayaran.');
+      showError('Gagal Menghapus Metode', err?.message || 'Terjadi kesalahan sistem.');
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -203,13 +231,23 @@ export default function PaymentMethodManager({ initialPaymentMethods = [] }: Pay
       </div>
 
       {showModal && (
-        <div className="modal-overlay" onClick={() => setShowModal(false)}>
-          <div className="modal-content max-w-lg p-6" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-overlay" onClick={() => { if (!isSubmitting) setShowModal(false); }}>
+          <div className="modal-content relative max-w-lg p-6 overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            {isSubmitting && (
+              <div className="absolute top-0 left-0 right-0 h-1 bg-indigo-100 overflow-hidden">
+                <div className="h-full bg-gradient-to-r from-blue-600 via-indigo-500 to-blue-600 animate-progress-infinite" />
+              </div>
+            )}
             <div className="flex justify-between items-center pb-3 border-b border-slate-100 mb-4">
               <h3 className="font-bold text-slate-800 text-sm">
                 {editingMethod ? 'Edit Metode Pembayaran' : 'Tambah Metode Pembayaran'}
               </h3>
-              <button type="button" onClick={() => setShowModal(false)} className="text-slate-400 hover:text-black">
+              <button
+                type="button"
+                disabled={isSubmitting}
+                onClick={() => setShowModal(false)}
+                className="text-slate-400 hover:text-black disabled:opacity-40"
+              >
                 ✕
               </button>
             </div>
@@ -280,11 +318,25 @@ export default function PaymentMethodManager({ initialPaymentMethods = [] }: Pay
               </div>
 
               <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
-                <button type="button" onClick={() => setShowModal(false)} className="btn btn-outline btn-sm">
+                <button
+                  type="button"
+                  disabled={isSubmitting}
+                  onClick={() => setShowModal(false)}
+                  className="btn btn-outline btn-sm disabled:opacity-50"
+                >
                   Batal
                 </button>
-                <button type="submit" className="btn btn-primary btn-sm">
-                  {editingMethod ? 'Simpan Perubahan' : 'Tambah Metode'}
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="btn btn-primary btn-sm flex items-center gap-1.5 disabled:opacity-75 disabled:cursor-not-allowed"
+                >
+                  {isSubmitting && (
+                    <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  )}
+                  {isSubmitting
+                    ? (editingMethod ? 'Memperbarui...' : 'Menyimpan...')
+                    : (editingMethod ? 'Simpan Perubahan' : 'Tambah Metode')}
                 </button>
               </div>
             </form>
@@ -292,35 +344,20 @@ export default function PaymentMethodManager({ initialPaymentMethods = [] }: Pay
         </div>
       )}
 
-      {pendingDelete && (
-        <div className="modal-overlay" onClick={() => setPendingDelete(null)}>
-          <div className="modal-content max-w-md p-6" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-start gap-4">
-              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-red-100 text-red-600 text-xl shrink-0">
-                ⚠
-              </div>
-              <div className="flex-1">
-                <h3 className="text-lg font-bold text-slate-800">Hapus Metode Pembayaran?</h3>
-                <p className="mt-2 text-sm text-slate-600">
-                  Anda yakin ingin menghapus <span className="font-semibold text-slate-800">{pendingDelete.name}</span>?
-                </p>
-                <p className="mt-1 text-xs text-slate-500">
-                  Tindakan ini tidak bisa dibatalkan dan opsi pembayaran tersebut akan hilang dari daftar peserta.
-                </p>
-              </div>
-            </div>
+      {/* Delete Confirmation Modal */}
+      <DeleteConfirmModal
+        open={Boolean(pendingDelete)}
+        title="Hapus Metode Pembayaran?"
+        message="Anda yakin ingin menghapus metode pembayaran"
+        itemName={pendingDelete?.name || null}
+        loading={isDeleting}
+        onConfirm={confirmDelete}
+        onCancel={() => {
+          if (!isDeleting) setPendingDelete(null);
+        }}
+      />
 
-            <div className="mt-6 flex justify-end gap-2 pt-4 border-t border-slate-100">
-              <button type="button" onClick={() => setPendingDelete(null)} className="btn btn-outline btn-sm">
-                Batal
-              </button>
-              <button type="button" onClick={confirmDelete} className="btn btn-danger btn-sm">
-                Ya, Hapus
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ActionToast toast={actionToast} onClose={hideToast} />
     </div>
   );
 }

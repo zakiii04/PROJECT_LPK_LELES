@@ -21,6 +21,10 @@ class Pendaftar extends Model
         'tempat_lahir',
         'tanggal_lahir',
         'alamat',
+        'provinsi',
+        'kabupaten_kota',
+        'kecamatan',
+        'desa_kelurahan',
         'tinggi_badan',
         'berat_badan',
         'lingkar_pinggang',
@@ -28,6 +32,9 @@ class Pendaftar extends Model
         'berkas_verifikasi',
         'no_hp',
         'email',
+        'jenjang_pendidikan',
+        'asal_sekolah',
+        'tahun_lulus',
         'jenis_pelatihan',
         'program_id',
         'tempat_pelatihan',
@@ -85,6 +92,11 @@ class Pendaftar extends Model
     public function cicilan()
     {
         return $this->hasMany(Cicilan::class, 'pendaftar_id');
+    }
+
+    public function tagihan()
+    {
+        return $this->hasOne(Tagihan::class, 'pendaftar_id');
     }
 
     public function interview()

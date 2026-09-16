@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import CertificateView from '@/Components/CertificateView';
 import DeleteConfirmModal from '@/Components/DeleteConfirmModal';
 import Pagination from '@/Components/Pagination';
+import ActionToast, { useActionToast } from '@/Components/ActionToast';
 import { pendaftarApi, hasilUjianApi, kehadiranApi, kelulusanApi } from '@/lib/api';
 import type { Pendaftar, Kelulusan, HasilUjian, Kehadiran } from '@/lib/types';
 
@@ -12,6 +13,8 @@ export default function GraduationManager() {
   const [kelulusanList, setKelulusanList] = useState<Kelulusan[]>([]);
   const [selectedKelulusanForCert, setSelectedKelulusanForCert] = useState<Kelulusan | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ pendaftarId: string; name: string } | null>(null);
+  const { actionToast, showLoading, showSuccess, showError, hideToast } = useActionToast();
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const [hasilUjianList, setHasilUjianList] = useState<HasilUjian[]>([]);
   const [kehadiranList, setKehadiranList] = useState<Kehadiran[]>([]);
@@ -44,29 +47,39 @@ export default function GraduationManager() {
     nilaiTugas: number,
     status_kelulusan: 'Lulus' | 'Tidak_Lulus'
   ) => {
+    showLoading('add', 'Memproses Kelulusan...', 'Sedang menghitung nilai akhir dan status kelulusan...');
     // Weighted formula: 15% Pretest, 45% Posttest, 20% Kehadiran, 20% Tugas
     const nilai_akhir = Number((
       nilaiPretest * 0.15 + nilaiPosttest * 0.45 + nilaiKehadiran * 0.2 + nilaiTugas * 0.2
     ).toFixed(2));
 
-    const res = await kelulusanApi.create({
-      pendaftar_id: pendaftar.id,
-      nilai_pretest: nilaiPretest,
-      nilai_posttest: nilaiPosttest,
-      nilai_kehadiran: nilaiKehadiran,
-      nilai_tugas: nilaiTugas,
-      nilai_akhir,
-      status_kelulusan,
-      tanggal_lulus: new Date().toLocaleDateString('id-ID', {
-        day: 'numeric',
-        month: 'long',
-        year: 'numeric',
-      }),
-    });
+    try {
+      const res = await kelulusanApi.create({
+        pendaftar_id: pendaftar.id,
+        nilai_pretest: nilaiPretest,
+        nilai_posttest: nilaiPosttest,
+        nilai_kehadiran: nilaiKehadiran,
+        nilai_tugas: nilaiTugas,
+        nilai_akhir,
+        status_kelulusan,
+        tanggal_lulus: new Date().toLocaleDateString('id-ID', {
+          day: 'numeric',
+          month: 'long',
+          year: 'numeric',
+        }),
+      });
 
-    await loadData();
-    if (status_kelulusan === 'Lulus' && res.data) {
-      setSelectedKelulusanForCert(res.data);
+      await loadData();
+      showSuccess(
+        'add',
+        status_kelulusan === 'Lulus' ? 'Peserta Dinyatakan Lulus!' : 'Hasil Kelulusan Disimpan',
+        `Nilai akhir ${pendaftar.nama_lengkap}: ${nilai_akhir}`
+      );
+      if (status_kelulusan === 'Lulus' && res.data) {
+        setSelectedKelulusanForCert(res.data);
+      }
+    } catch (e: any) {
+      showError('Gagal Memproses Kelulusan', e?.message || 'Terjadi kesalahan sistem.');
     }
   };
 
@@ -76,12 +89,24 @@ export default function GraduationManager() {
 
   const confirmResetKelulusan = async () => {
     if (!deleteTarget) return;
-    const kelulusan = kelulusanList.find((item) => item.pendaftar_id === deleteTarget.pendaftarId);
-    if (kelulusan) {
-      await kelulusanApi.destroy(kelulusan.id);
+
+    setIsDeleting(true);
+    showLoading('delete', `Mereset Kelulusan ${deleteTarget.name}...`, 'Sedang menghapus data kelulusan...');
+
+    try {
+      const kelulusan = kelulusanList.find((item) => item.pendaftar_id === deleteTarget.pendaftarId);
+      if (kelulusan) {
+        await kelulusanApi.destroy(kelulusan.id);
+      }
+      const deletedName = deleteTarget.name;
+      setDeleteTarget(null);
+      await loadData();
+      showSuccess('delete', 'Data Kelulusan Direset!', `Kelulusan untuk "${deletedName}" telah direset.`);
+    } catch (e: any) {
+      showError('Gagal Mereset Kelulusan', e?.message || 'Terjadi kesalahan sistem.');
+    } finally {
+      setIsDeleting(false);
     }
-    setDeleteTarget(null);
-    await loadData();
   };
 
   return (
@@ -91,9 +116,14 @@ export default function GraduationManager() {
         title="Hapus Data Kelulusan?"
         message="Anda yakin ingin menghapus data kelulusan"
         itemName={deleteTarget?.name || null}
+        loading={isDeleting}
         onConfirm={confirmResetKelulusan}
-        onCancel={() => setDeleteTarget(null)}
+        onCancel={() => {
+          if (!isDeleting) setDeleteTarget(null);
+        }}
       />
+
+      <ActionToast toast={actionToast} onClose={hideToast} />
 
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[var(--card-border)]">

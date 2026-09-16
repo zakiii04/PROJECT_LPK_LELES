@@ -611,6 +611,50 @@ textarea.form-input {
   animation: scaleIn 0.4s ease-out;
 }
 
+@keyframes toastSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-16px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes indeterminateProgress {
+  0% {
+    transform: translateX(-100%);
+  }
+  50% {
+    transform: translateX(25%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes toastCountdown {
+  from {
+    width: 100%;
+  }
+  to {
+    width: 0%;
+  }
+}
+
+.animate-toast-in {
+  animation: toastSlideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-progress-infinite {
+  animation: indeterminateProgress 1.4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+.animate-toast-countdown {
+  animation: toastCountdown linear forwards;
+}
+
 /* ═══════════════════════════════════════════
    NAVBAR
    ═══════════════════════════════════════════ */

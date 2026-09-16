@@ -12,7 +12,7 @@ import { type PendaftarFormData, formToApiPayload } from '@/lib/storage';
 import { pendaftarApi } from '@/lib/api';
 import type { Pendaftar } from '@/lib/types';
 
-const STEP_LABELS = ['Data Diri', 'Data Fisik', 'Kontak', 'Pelatihan'];
+const STEP_LABELS = ['Data Diri', 'Data Fisik', 'Informasi Pribadi', 'Pelatihan'];
 
 const initialFormData: PendaftarFormData = {
   nama_lengkap: '',
@@ -30,6 +30,9 @@ const initialFormData: PendaftarFormData = {
   riwayat_penyakit: '',
   no_hp: '',
   email: '',
+  jenjang_pendidikan: '',
+  asal_sekolah: '',
+  tahun_lulus: '',
   jenis_pelatihan: '',
   motivasi: '',
   username: '',
@@ -41,6 +44,7 @@ export default function PendaftaranPage() {
   const [formData, setFormData] = useState<PendaftarFormData>(initialFormData);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isSubmitted, setIsSubmitted] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [no_pendaftaran, setno_pendaftaran] = useState('');
 
   const handleChange = (field: keyof PendaftarFormData, value: string) => {
@@ -107,7 +111,11 @@ export default function PendaftaranPage() {
       else if (formData.no_hp.length < 10 || formData.no_hp.length > 13) newErrors.no_hp = 'Nomor HP harus 10-13 digit';
       if (!formData.email.trim()) newErrors.email = 'Email wajib diisi';
       else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) newErrors.email = 'Format email tidak valid';
-      
+      if (!formData.jenjang_pendidikan?.trim()) newErrors.jenjang_pendidikan = 'Jenjang pendidikan wajib dipilih';
+      if (!formData.asal_sekolah?.trim()) newErrors.asal_sekolah = 'Asal sekolah wajib diisi';
+      if (!formData.tahun_lulus?.trim()) newErrors.tahun_lulus = 'Tahun lulus wajib diisi';
+      else if (!/^\d{4}$/.test(formData.tahun_lulus) || Number(formData.tahun_lulus) < 1900 || Number(formData.tahun_lulus) > new Date().getFullYear() + 1)
+        newErrors.tahun_lulus = 'Tahun lulus tidak valid';
     }
 
     if (step === 4) {
@@ -140,7 +148,8 @@ export default function PendaftaranPage() {
   const [createdPendaftar, setCreatedPendaftar] = useState<Pendaftar | null>(null);
 
   const handleSubmit = async () => {
-    if (!validateStep(4)) return;
+    if (isSubmitting || !validateStep(4)) return;
+    setIsSubmitting(true);
     try {
       const res = await pendaftarApi.create(formToApiPayload(formData));
       const pendaftar = res.data;
@@ -155,6 +164,8 @@ export default function PendaftaranPage() {
     } catch (error: any) {
       console.error('Error submitting form:', error);
       alert(error.message || 'Gagal mengirim pendaftaran.');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -237,6 +248,15 @@ export default function PendaftaranPage() {
   return (
     <>
       <Navbar />
+      {isSubmitting && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/45 backdrop-blur-sm" role="status" aria-live="polite">
+          <div className="w-[min(90vw,360px)] rounded-2xl bg-white px-7 py-6 text-center shadow-2xl border border-slate-200">
+            <div className="w-10 h-10 mx-auto mb-4 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin" />
+            <p className="text-base font-bold text-slate-900">Mengirim pendaftaran...</p>
+            <p className="mt-1 text-xs text-slate-500">Mohon tunggu, data Anda sedang disimpan.</p>
+          </div>
+        </div>
+      )}
       <main className="flex-1 py-8 md:py-12">
         <div className="container-narrow">
           <div className="text-center mb-8">
@@ -267,7 +287,7 @@ export default function PendaftaranPage() {
                   </svg>
                 </button>
               ) : (
-                <button onClick={handleSubmit} className="btn btn-accent">
+                <button onClick={handleSubmit} disabled={isSubmitting} className="btn btn-accent disabled:opacity-60 disabled:cursor-not-allowed">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" />
                   </svg>
@@ -281,8 +301,6 @@ export default function PendaftaranPage() {
     </>
   );
 }
-
-
 
 
 

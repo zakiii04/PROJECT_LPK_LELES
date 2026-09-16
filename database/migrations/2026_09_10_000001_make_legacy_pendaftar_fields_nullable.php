@@ -10,9 +10,6 @@ return new class extends Migration
     {
         Schema::table('pendaftars', function (Blueprint $table) {
             $table->string('jenis_kelamin')->nullable()->change();
-            $table->string('nama_kontak_darurat')->nullable()->change();
-            $table->string('no_hp_kontak_darurat')->nullable()->change();
-            $table->string('hubungan_kontak_darurat')->nullable()->change();
         });
     }
 
@@ -20,9 +17,6 @@ return new class extends Migration
     {
         Schema::table('pendaftars', function (Blueprint $table) {
             $table->string('jenis_kelamin')->nullable(false)->change();
-            $table->string('nama_kontak_darurat')->nullable(false)->change();
-            $table->string('no_hp_kontak_darurat')->nullable(false)->change();
-            $table->string('hubungan_kontak_darurat')->nullable(false)->change();
         });
     }
 };

@@ -30,12 +30,25 @@ export default function PesertaPembayaranModal({
   const [step, setStep] = useState<ModalStep>(getInitialStep());
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
   const [metode, setMetode] = useState('');
+  const [tipePembayaran, setTipePembayaran] = useState<'cash' | 'transfer'>('transfer');
+  const [namaPenerima, setNamaPenerima] = useState('');
+  const [namaPengirim, setNamaPengirim] = useState('');
+  const [jenisPengirim, setJenisPengirim] = useState('');
   const [buktiFile, setBuktiFile] = useState<File | null>(null);
   const [buktiPreview, setBuktiPreview] = useState<string | null>(null);
   const [jumlahTermin, setJumlahTermin] = useState<2 | 3>(3);
   const [selectedTermin, setSelectedTermin] = useState<number>(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
+
+  const resetTransactionFields = () => {
+    setBuktiFile(null);
+    setBuktiPreview(null);
+    setNamaPenerima('');
+    setNamaPengirim('');
+    setJenisPengirim('');
+    setError('');
+  };
 
   useEffect(() => {
     const loadPaymentMethods = async () => {
@@ -89,8 +102,12 @@ export default function PesertaPembayaranModal({
     e.preventDefault();
     setError('');
 
-    if (!buktiFile && !buktiPreview) {
-      setError('Silakan unggah bukti transfer pembayaran terlebih dahulu.');
+    if (tipePembayaran === 'cash' && !namaPenerima.trim()) {
+      setError('Nama penerima wajib diisi untuk pembayaran cash.');
+      return;
+    }
+    if (tipePembayaran === 'transfer' && (!namaPengirim.trim() || !jenisPengirim.trim() || !buktiFile)) {
+      setError('Nama pengirim, jenis pengirim, dan bukti transfer wajib diisi.');
       return;
     }
 
@@ -102,6 +119,12 @@ export default function PesertaPembayaranModal({
         formData.append('bukti_pembayaran', buktiFile);
       }
       formData.append('metode_pembayaran', metode);
+      formData.append('tipe_pembayaran', tipePembayaran);
+      formData.append('nominal', String(totalBiaya));
+      formData.append('nama_penerima', namaPenerima);
+      formData.append('nama_pengirim', namaPengirim);
+      formData.append('jenis_pengirim', jenisPengirim);
+      formData.append('payment_method_id', tipePembayaran === 'transfer' ? metode : '');
       formData.append('jenis_pembayaran', 'lunas');
 
       await pembayaranApi.uploadBukti(pendaftar.id, formData);
@@ -117,8 +140,12 @@ export default function PesertaPembayaranModal({
     e.preventDefault();
     setError('');
 
-    if (!buktiFile && !buktiPreview) {
-      setError('Silakan unggah bukti transfer untuk termin ini.');
+    if (tipePembayaran === 'cash' && !namaPenerima.trim()) {
+      setError('Nama penerima wajib diisi untuk pembayaran cash.');
+      return;
+    }
+    if (tipePembayaran === 'transfer' && (!namaPengirim.trim() || !jenisPengirim.trim() || !buktiFile)) {
+      setError('Nama pengirim, jenis pengirim, dan bukti transfer wajib diisi.');
       return;
     }
 
@@ -128,11 +155,15 @@ export default function PesertaPembayaranModal({
       const targetCicilan = cicilanList.find((c) => c.termin === selectedTermin);
       if (targetCicilan) {
         const formData = new FormData();
-        if (buktiFile) {
-          formData.append('bukti_pembayaran', buktiFile);
-        }
+        if (buktiFile) formData.append('bukti_pembayaran', buktiFile);
         formData.append('metode_pembayaran', metode);
-        await cicilanApi.uploadBukti(targetCicilan.id, formData);
+        formData.append('tipe_pembayaran', tipePembayaran);
+        formData.append('nominal', String(targetCicilan.jumlah));
+        formData.append('nama_penerima', namaPenerima);
+        formData.append('nama_pengirim', namaPengirim);
+        formData.append('jenis_pengirim', jenisPengirim);
+        formData.append('payment_method_id', tipePembayaran === 'transfer' ? metode : '');
+        await pembayaranApi.uploadBukti(pendaftar.id, formData);
       }
       onSuccess();
     } catch (err: any) {
@@ -272,6 +303,27 @@ export default function PesertaPembayaranModal({
             </div>
 
             <form onSubmit={handleSubmitLunas} className="space-y-5">
+              <div className="space-y-3">
+                <label className="form-label">Tipe Pembayaran</label>
+                <div className="grid grid-cols-2 gap-2">
+                  {(['cash', 'transfer'] as const).map((type) => (
+                    <button key={type} type="button" onClick={() => { setTipePembayaran(type); resetTransactionFields(); }} className={`px-3 py-2 rounded-lg border text-xs font-bold capitalize ${tipePembayaran === type ? 'border-indigo-500 bg-indigo-50 text-indigo-700' : 'border-slate-200 bg-white text-slate-500'}`}>
+                      {type}
+                    </button>
+                  ))}
+                </div>
+                {tipePembayaran === 'cash' ? (
+                  <input className="form-input" placeholder="Nama penerima pembayaran" value={namaPenerima} onChange={(e) => setNamaPenerima(e.target.value)} />
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <input className="form-input" placeholder="Nama pengirim" value={namaPengirim} onChange={(e) => setNamaPengirim(e.target.value)} />
+                    
+                    <input className="form-input" placeholder="Asal bank" value={jenisPengirim} onChange={(e) => setJenisPengirim(e.target.value)} />
+                  </div>
+                )}
+              </div>
+
+              {tipePembayaran === 'transfer' && (
               <div>
                 <label className="form-label mb-2">Pilih Rekening Tujuan</label>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -292,9 +344,10 @@ export default function PesertaPembayaranModal({
                   ))}
                 </div>
               </div>
+              )}
 
-              <div>
-                <label className="form-label">Unggah Bukti Transfer / Pembayaran <span className="required">*</span></label>
+              {tipePembayaran === 'transfer' && <div>
+                <label className="form-label">Unggah Bukti Transfer <span className="required">*</span></label>
                 <div className="mt-1 flex flex-col items-center justify-center p-5 border-2 border-dashed border-[var(--input-border)] rounded-xl bg-[var(--surface)] text-center cursor-pointer hover:bg-[var(--card-bg)] transition-colors relative">
                   <input
                     type="file"
@@ -322,7 +375,7 @@ export default function PesertaPembayaranModal({
                     </div>
                   )}
                 </div>
-              </div>
+              </div>}
 
               {error && (
                 <div className="p-3 rounded-lg bg-[var(--danger-bg)] text-xs text-[var(--danger)]">
@@ -371,6 +424,39 @@ export default function PesertaPembayaranModal({
                 </span>
               </div>
             </div>
+
+            <div className="space-y-3">
+              <label className="form-label">Tipe Pembayaran</label>
+              <div className="grid grid-cols-2 gap-2">
+                {(['cash', 'transfer'] as const).map((type) => (
+                  <button key={type} type="button" onClick={() => { setTipePembayaran(type); resetTransactionFields(); }} className={`px-3 py-2 rounded-lg border text-xs font-bold capitalize ${tipePembayaran === type ? 'border-indigo-500 bg-indigo-50 text-indigo-700' : 'border-slate-200 bg-white text-slate-500'}`}>
+                    {type}
+                  </button>
+                ))}
+              </div>
+              {tipePembayaran === 'cash' ? (
+                <input className="form-input" placeholder="Nama penerima pembayaran" value={namaPenerima} onChange={(e) => setNamaPenerima(e.target.value)} />
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <input className="form-input" placeholder="Nama pengirim" value={namaPengirim} onChange={(e) => setNamaPengirim(e.target.value)} />
+                  <input className="form-input" placeholder="Jenis pengirim (Pribadi/Instansi)" value={jenisPengirim} onChange={(e) => setJenisPengirim(e.target.value)} />
+                </div>
+              )}
+            </div>
+
+            {tipePembayaran === 'transfer' && (
+              <div>
+                <label className="form-label mb-2">Pilih Rekening Tujuan</label>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  {metodePembayaranOptions.map((m) => (
+                    <button type="button" key={m.id} onClick={() => setMetode(m.id)} className={`p-3 rounded-xl border text-left ${metode === m.id ? 'border-indigo-500 bg-indigo-50' : 'border-slate-200 bg-white'}`}>
+                      <div className="font-bold text-xs">{m.name}</div>
+                      <div className="text-[10px] text-slate-500 font-mono">{m.account}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
 
             <div className="space-y-0">
               <div className="text-xs font-bold uppercase tracking-wider text-[var(--text-tertiary)] mb-3">
@@ -445,7 +531,26 @@ export default function PesertaPembayaranModal({
                   </h4>
                 </div>
 
-                <div>
+                <div className="space-y-2">
+                  <label className="form-label">Tipe Pembayaran</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {(['cash', 'transfer'] as const).map((type) => (
+                      <button key={type} type="button" onClick={() => { setTipePembayaran(type); resetTransactionFields(); }} className={`px-3 py-2 rounded-lg border text-xs font-bold capitalize ${tipePembayaran === type ? 'border-indigo-500 bg-indigo-50 text-indigo-700' : 'border-slate-200 bg-white text-slate-500'}`}>
+                        {type}
+                      </button>
+                    ))}
+                  </div>
+                  {tipePembayaran === 'cash' ? (
+                    <input className="form-input" placeholder="Nama penerima pembayaran" value={namaPenerima} onChange={(e) => setNamaPenerima(e.target.value)} />
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <input className="form-input" placeholder="Nama pengirim" value={namaPengirim} onChange={(e) => setNamaPengirim(e.target.value)} />
+                      <input className="form-input" placeholder="Jenis pengirim (Pribadi/Instansi)" value={jenisPengirim} onChange={(e) => setJenisPengirim(e.target.value)} />
+                    </div>
+                  )}
+                </div>
+
+                {tipePembayaran === 'transfer' && <div>
                   <label className="form-label mb-2">Rekening Tujuan</label>
                   <div className="grid grid-cols-3 gap-2">
                     {metodePembayaranOptions.map((m) => (
@@ -463,9 +568,9 @@ export default function PesertaPembayaranModal({
                       </div>
                     ))}
                   </div>
-                </div>
+                </div>}
 
-                <div>
+                {tipePembayaran === 'transfer' && <div>
                   <label className="form-label">Bukti Transfer <span className="required">*</span></label>
                   <div className="mt-1 flex flex-col items-center justify-center p-4 border-2 border-dashed border-[var(--input-border)] rounded-xl bg-white text-center cursor-pointer hover:bg-slate-50 transition-colors relative">
                     <input
@@ -494,7 +599,7 @@ export default function PesertaPembayaranModal({
                       </div>
                     )}
                   </div>
-                </div>
+                </div>}
 
                 {error && (
                   <div className="p-3 rounded-lg bg-[var(--danger-bg)] text-xs text-[var(--danger)]">

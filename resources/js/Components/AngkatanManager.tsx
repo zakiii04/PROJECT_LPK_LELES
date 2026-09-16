@@ -1,10 +1,11 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { angkatanApi, pendaftarApi, programApi } from '@/lib/api';
+import { angkatanApi, pendaftarApi, programApi, kelulusanApi } from '@/lib/api';
 import type { Angkatan, Pendaftar, AngkatanStatus, Program } from '@/lib/types';
 import AdminPendaftarDetail from '@/Components/AdminPendaftarDetail';
 import DeleteConfirmModal from '@/Components/DeleteConfirmModal';
+import ActionToast, { useActionToast } from '@/Components/ActionToast';
 
 const formatDateOnly = (dateStr?: string) => {
   if (!dateStr) return 'Ditentukan kemudian';
@@ -48,6 +49,13 @@ export default function AngkatanManager({
   const [viewingParticipantDetail, setViewingParticipantDetail] = useState<Pendaftar | null>(null);
   const [isLoadingPeserta, setIsLoadingPeserta] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
+  const { actionToast, showLoading, showSuccess, showError, hideToast } = useActionToast();
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [selectedAngkatanForCompletion, setSelectedAngkatanForCompletion] = useState<Angkatan | null>(null);
+  const [completionPeserta, setCompletionPeserta] = useState<Pendaftar[]>([]);
+  const [lulusPesertaIds, setLulusPesertaIds] = useState<Set<string>>(new Set());
+  const [isCompleting, setIsCompleting] = useState(false);
 
   // Form states for Angkatan
   const [kode, setKode] = useState('');
@@ -60,7 +68,6 @@ export default function AngkatanManager({
   const [tglMulai, setTglMulai] = useState('');
   const [tglSelesai, setTglSelesai] = useState('');
   const [kuota, setKuota] = useState(30);
-  const [instruktur, setInstruktur] = useState('Instruktur Utama');
   const [status, setStatus] = useState<AngkatanStatus>('On_Going');
 
   const loadData = useCallback(async () => {
@@ -120,6 +127,51 @@ export default function AngkatanManager({
     }
   };
 
+  const isTrainingFinished = (ang: Angkatan) => {
+    if (!ang.tanggal_selesai || ang.status === 'Selesai') return false;
+    const endDate = new Date(`${ang.tanggal_selesai.split('T')[0]}T23:59:59`);
+    return endDate.getTime() < Date.now();
+  };
+
+  const handleOpenCompletion = async (ang: Angkatan) => {
+    setSelectedAngkatanForCompletion(ang);
+    try {
+      const res = await angkatanApi.getPendaftar(ang.id);
+      const peserta = (res.data || []).filter((p: Pendaftar) => p.status === 'diterima');
+      setCompletionPeserta(peserta);
+      setLulusPesertaIds(new Set(peserta.map((p: Pendaftar) => p.id)));
+    } catch {
+      const peserta = pendaftarList.filter((p) => p.angkatan_id === ang.id && p.status === 'diterima');
+      setCompletionPeserta(peserta);
+      setLulusPesertaIds(new Set(peserta.map((p) => p.id)));
+    }
+  };
+
+  const handleCompleteAngkatan = async () => {
+    if (!selectedAngkatanForCompletion) return;
+    setIsCompleting(true);
+    try {
+      const today = new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
+      const results = await Promise.all(completionPeserta.map((p) => kelulusanApi.create({
+        pendaftar_id: p.id, nilai_pretest: 0, nilai_posttest: 0, nilai_kehadiran: 0,
+        nilai_tugas: 0, nilai_akhir: 0,
+        status_kelulusan: lulusPesertaIds.has(p.id) ? 'Lulus' : 'Tidak_Lulus',
+        tanggal_lulus: today,
+      })));
+      if (results.some((result) => !result.success)) {
+        throw new Error(results.find((result) => !result.success)?.error || 'Sebagian data kelulusan gagal disimpan.');
+      }
+      await angkatanApi.updateStatus(selectedAngkatanForCompletion.id, 'Selesai');
+      setSelectedAngkatanForCompletion(null);
+      await loadData();
+      showSuccess('edit', 'Angkatan Diselesaikan', 'Checklist kelulusan peserta telah disimpan.');
+    } catch (err: any) {
+      showError('Gagal Menyelesaikan Angkatan', err?.message || 'Kelulusan peserta belum tersimpan.');
+    } finally {
+      setIsCompleting(false);
+    }
+  };
+
   const handleOpenAddModal = () => {
     setEditingAngkatan(null);
     setKode('');
@@ -132,7 +184,6 @@ export default function AngkatanManager({
     setTglMulai('');
     setTglSelesai('');
     setKuota(30);
-    setInstruktur('Instruktur Utama');
     setStatus('On_Going');
     setShowAddModal(true);
   };
@@ -149,7 +200,6 @@ export default function AngkatanManager({
     setTglMulai(ang.tanggal_mulai ? ang.tanggal_mulai.split('T')[0] : '');
     setTglSelesai(ang.tanggal_selesai ? ang.tanggal_selesai.split('T')[0] : '');
     setKuota(ang.kuota);
-    setInstruktur(ang.instruktur_nama);
     setStatus(ang.status || 'On_Going');
     setShowAddModal(true);
   };
@@ -157,6 +207,14 @@ export default function AngkatanManager({
   const handleSaveAngkatan = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!kode || !nama || !tglMulai || !tglSelesai) return;
+
+    setIsSubmitting(true);
+    const isEdit = Boolean(editingAngkatan);
+    showLoading(
+      isEdit ? 'edit' : 'add',
+      isEdit ? 'Memperbarui Data Angkatan...' : 'Membuat Angkatan Baru...',
+      'Sedang memproses dan menyimpan ke sistem...'
+    );
 
     try {
       const payload = {
@@ -170,7 +228,6 @@ export default function AngkatanManager({
         tanggal_mulai: tglMulai,
         tanggal_selesai: tglSelesai,
         kuota: Number(kuota),
-        instruktur_nama: instruktur,
         status,
       };
 
@@ -180,12 +237,20 @@ export default function AngkatanManager({
         await angkatanApi.create(payload);
       }
 
+      const savedName = nama;
       setShowAddModal(false);
       setEditingAngkatan(null);
       await loadData();
-    } catch (err) {
+      showSuccess(
+        isEdit ? 'edit' : 'add',
+        isEdit ? 'Data Angkatan Berhasil Diperbarui!' : 'Angkatan Baru Berhasil Dibuat!',
+        `Angkatan "${savedName}" telah tersimpan.`
+      );
+    } catch (err: any) {
       console.error('Error saving angkatan:', err);
-      alert('Gagal menyimpan data angkatan. Mohon periksa kembali inputan Anda.');
+      showError('Gagal Menyimpan Angkatan', err?.message || 'Mohon periksa kembali inputan Anda.');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -195,12 +260,21 @@ export default function AngkatanManager({
 
   const confirmDelete = async () => {
     if (!deleteTarget) return;
+
+    setIsDeleting(true);
+    showLoading('delete', `Menghapus ${deleteTarget.name}...`, 'Sedang menghapus data dari sistem...');
+
     try {
       await angkatanApi.destroy(deleteTarget.id);
+      const deletedName = deleteTarget.name;
       setDeleteTarget(null);
-      loadData();
-    } catch (err) {
+      await loadData();
+      showSuccess('delete', 'Data Angkatan Berhasil Dihapus!', `"${deletedName}" telah dihapus.`);
+    } catch (err: any) {
       console.error('Error deleting angkatan:', err);
+      showError('Gagal Menghapus Angkatan', err?.message || 'Terjadi kesalahan sistem.');
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -241,7 +315,7 @@ export default function AngkatanManager({
 
   // Hitung jumlah peserta terdaftar secara akurat dari pendaftarList / relasi / pendaftar_count
   const getFilledCount = (ang: Angkatan) => {
-    const listCount = pendaftarList.filter((p) => p.angkatan_id === ang.id).length;
+    const listCount = pendaftarList.filter((p) => p.angkatan_id === ang.id && p.status === 'diterima').length;
     const relCount = (ang.pendaftar && Array.isArray(ang.pendaftar)) ? ang.pendaftar.length : 0;
     const serverCount = typeof ang.pendaftar_count === 'number' ? ang.pendaftar_count : 0;
     return Math.max(listCount, relCount, serverCount);
@@ -345,11 +419,6 @@ export default function AngkatanManager({
                   </div>
                 </div>
 
-                <div className="text-[11px] text-[var(--text-tertiary)] flex items-center gap-1">
-                  <span>Instruktur Utama:</span>
-                  <span className="font-semibold text-[var(--text-primary)]">{ang.instruktur_nama}</span>
-                </div>
-
                 {/* Progress Bar Kuota */}
                 <div className="pt-1">
                   <div className="flex justify-between text-xs mb-1 font-semibold">
@@ -388,6 +457,11 @@ export default function AngkatanManager({
                     </svg>
                     <span>Plotting</span>
                   </button>
+                  {isTrainingFinished(ang) && (
+                    <button onClick={() => handleOpenCompletion(ang)} className="btn btn-sm text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white">
+                      Selesaikan Angkatan
+                    </button>
+                  )}
                 </div>
 
                 <div className="flex items-center gap-1.5">
@@ -400,15 +474,56 @@ export default function AngkatanManager({
         })}
       </div>
 
+      {selectedAngkatanForCompletion && (
+        <div className="modal-overlay" onClick={() => !isCompleting && setSelectedAngkatanForCompletion(null)}>
+          <div className="modal-content max-w-2xl p-6 space-y-4" onClick={(e) => e.stopPropagation()}>
+            <div className="border-b pb-3">
+              <h3 className="font-bold text-slate-800">Selesaikan {selectedAngkatanForCompletion.nama_angkatan}</h3>
+              <p className="text-xs text-slate-500 mt-1">Centang peserta yang dinyatakan lulus. Peserta yang tidak dicentang akan disimpan sebagai tidak lulus.</p>
+            </div>
+            <div className="max-h-[50vh] overflow-y-auto space-y-2">
+              {completionPeserta.map((p) => (
+                <label key={p.id} className="flex items-center gap-3 p-3 rounded-xl border border-slate-200 cursor-pointer hover:bg-slate-50">
+                  <input type="checkbox" checked={lulusPesertaIds.has(p.id)} onChange={(e) => setLulusPesertaIds((current) => {
+                    const next = new Set(current); e.target.checked ? next.add(p.id) : next.delete(p.id); return next;
+                  })} className="w-4 h-4 accent-emerald-600" />
+                  <span className="text-xs font-bold text-slate-800">{p.nama_lengkap}</span>
+                  <span className="ml-auto font-mono text-[10px] text-slate-500">{p.no_pendaftaran}</span>
+                </label>
+              ))}
+              {!completionPeserta.length && <p className="text-center text-xs text-slate-500 py-8">Tidak ada peserta diterima pada angkatan ini.</p>}
+            </div>
+            <div className="flex justify-end gap-3 border-t pt-4">
+              <button disabled={isCompleting} onClick={() => setSelectedAngkatanForCompletion(null)} className="btn btn-outline btn-sm">Batal</button>
+              <button disabled={isCompleting || !completionPeserta.length} onClick={handleCompleteAngkatan} className="btn btn-sm bg-emerald-600 hover:bg-emerald-700 text-white font-bold disabled:opacity-60">
+                {isCompleting ? 'Menyimpan...' : 'Simpan Kelulusan & Selesaikan'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Modal Add / Edit Angkatan */}
       {showAddModal && (
-        <div className="modal-overlay" onClick={() => setShowAddModal(false)}>
-          <div className="modal-content max-w-lg p-6" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-overlay" onClick={() => { if (!isSubmitting) setShowAddModal(false); }}>
+          <div className="modal-content relative max-w-lg p-6 overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            {isSubmitting && (
+              <div className="absolute top-0 left-0 right-0 h-1 bg-indigo-100 overflow-hidden">
+                <div className="h-full bg-gradient-to-r from-blue-600 via-indigo-500 to-blue-600 animate-progress-infinite" />
+              </div>
+            )}
             <div className="flex justify-between items-center pb-3 border-b border-slate-100 mb-4">
               <h3 className="font-bold text-slate-800 text-sm">
                 {editingAngkatan ? 'Edit Data Angkatan' : 'Buat Angkatan Pelatihan Baru'}
               </h3>
-              <button onClick={() => setShowAddModal(false)} className="text-slate-400 hover:text-black">✕</button>
+              <button
+                type="button"
+                disabled={isSubmitting}
+                onClick={() => setShowAddModal(false)}
+                className="text-slate-400 hover:text-black disabled:opacity-40"
+              >
+                ✕
+              </button>
             </div>
 
             <form onSubmit={handleSaveAngkatan} className="space-y-4 text-xs">
@@ -490,15 +605,29 @@ export default function AngkatanManager({
                     <option value="Selesai">Selesai</option>
                   </select>
                 </div>
-                <div>
-                  <label className="form-label">Instruktur Utama</label>
-                  <input type="text" className="form-input" placeholder="Nama Instruktur" value={instruktur} onChange={(e) => setInstruktur(e.target.value)} required />
-                </div>
               </div>
 
               <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
-                <button type="button" onClick={() => setShowAddModal(false)} className="btn btn-outline btn-sm">Batal</button>
-                <button type="submit" className="btn btn-primary btn-sm">Simpan Angkatan</button>
+                <button
+                  type="button"
+                  disabled={isSubmitting}
+                  onClick={() => setShowAddModal(false)}
+                  className="btn btn-outline btn-sm disabled:opacity-50"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="btn btn-primary btn-sm flex items-center gap-1.5 disabled:opacity-75 disabled:cursor-not-allowed"
+                >
+                  {isSubmitting && (
+                    <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  )}
+                  {isSubmitting
+                    ? (editingAngkatan ? 'Memperbarui...' : 'Menyimpan...')
+                    : (editingAngkatan ? 'Simpan Perubahan' : 'Simpan Angkatan')}
+                </button>
               </div>
             </form>
           </div>
@@ -526,7 +655,7 @@ export default function AngkatanManager({
                 Pilih peserta terdaftar:
               </div>
 
-              {pendaftarList.map((p) => {
+              {pendaftarList.filter((p) => p.status === 'diterima').map((p) => {
                 const isChecked = (selectedAngkatanForPlotting.pendaftar || []).some((peserta) => peserta.id === p.id) || p.angkatan_id === selectedAngkatanForPlotting.id;
                 return (
                   <div
@@ -699,6 +828,22 @@ export default function AngkatanManager({
           onStatusChange={loadData}
         />
       )}
+
+      {/* Delete Confirmation Modal */}
+      <DeleteConfirmModal
+        open={Boolean(deleteTarget)}
+        title="Hapus Data Angkatan?"
+        message="Anda yakin ingin menghapus angkatan pelatihan"
+        itemName={deleteTarget?.name || null}
+        loading={isDeleting}
+        onConfirm={confirmDelete}
+        onCancel={() => {
+          if (!isDeleting) setDeleteTarget(null);
+        }}
+      />
+
+      {/* Action Toast Feedback */}
+      <ActionToast toast={actionToast} onClose={hideToast} />
     </div>
   );
 }

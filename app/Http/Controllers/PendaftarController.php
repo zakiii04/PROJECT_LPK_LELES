@@ -12,7 +12,7 @@ class PendaftarController extends Controller
 {
     public function index(Request $request)
     {
-        $query = Pendaftar::with(['program', 'angkatan', 'user']);
+        $query = Pendaftar::with(['program', 'angkatan', 'user', 'tagihan.pembayarans.paymentMethod']);
         if ($request->status)            $query->where('status', $request->status);
         if ($request->angkatan_id)       $query->where('angkatan_id', $request->angkatan_id);
         if ($request->program_id)        $query->where('program_id', $request->program_id);
@@ -37,12 +37,19 @@ class PendaftarController extends Controller
             'tempat_lahir'            => 'required|string',
             'tanggal_lahir'           => 'required|date',
             'alamat'                  => 'required|string',
+            'provinsi'                => 'nullable|string|max:255',
+            'kabupaten_kota'          => 'nullable|string|max:255',
+            'kecamatan'               => 'nullable|string|max:255',
+            'desa_kelurahan'          => 'nullable|string|max:255',
             'tinggi_badan'            => 'required|numeric|min:100|max:250',
             'berat_badan'             => 'required|numeric|min:30|max:200',
             'lingkar_pinggang'        => 'required|string',
             'riwayat_penyakit'        => 'nullable|string',
             'no_hp'                   => 'required|string',
             'email'                   => 'required|email',
+            'jenjang_pendidikan'      => 'nullable|string|max:100',
+            'asal_sekolah'            => 'nullable|string|max:255',
+            'tahun_lulus'             => 'nullable|integer|min:1900|max:' . (now()->year + 1),
             'jenis_pelatihan'         => 'required|string',
             'program_id'              => 'nullable|exists:program_pelatihans,id',
             'motivasi'                => 'required|string',
@@ -71,18 +78,7 @@ class PendaftarController extends Controller
         }
         $validated['tanggal_daftar']  = now();
 
-        $angkatanOpen = null;
-        if (!empty($validated['program_id'])) {
-            $angkatanOpen = \App\Models\Angkatan::where('program_id', $validated['program_id'])
-                ->where('status', 'Pendaftaran')
-                ->first();
-        }
-        if (!$angkatanOpen) {
-            $angkatanOpen = \App\Models\Angkatan::where('status', 'Pendaftaran')->first();
-        }
-        if ($angkatanOpen) {
-            $validated['angkatan_id'] = $angkatanOpen->id;
-        }
+        // Angkatan dipilih saat admin menerima peserta, bukan ketika formulir dikirim.
 
         if (empty($validated['user_id'])) {
             $user = \App\Models\User::where('email', $validated['email'])->first();
@@ -120,7 +116,7 @@ class PendaftarController extends Controller
 
     public function show(string $id)
     {
-        $p = Pendaftar::with(['program', 'angkatan', 'user', 'interview', 'cicilan', 'kelulusan'])->findOrFail($id);
+        $p = Pendaftar::with(['program', 'angkatan', 'user', 'interview', 'cicilan', 'tagihan.pembayarans.paymentMethod', 'kelulusan'])->findOrFail($id);
         return response()->json(['success' => true, 'data' => $p]);
     }
 
@@ -303,7 +299,7 @@ class PendaftarController extends Controller
 
     public function byAngkatan(string $angkatanId)
     {
-        $pendaftar = Pendaftar::where('angkatan_id', $angkatanId)->with('user')->get();
+        $pendaftar = Pendaftar::where('angkatan_id', $angkatanId)->where('status', 'diterima')->with('user')->get();
         return response()->json(['success' => true, 'data' => $pendaftar]);
     }
 }

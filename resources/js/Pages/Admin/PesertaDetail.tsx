@@ -40,6 +40,9 @@ export default function PesertaDetailPage({ id, initialPendaftar, initialAngkata
     riwayat_penyakit: string;
     no_hp: string;
     email: string;
+    jenjang_pendidikan: string;
+    asal_sekolah: string;
+    tahun_lulus: string;
     jenis_pelatihan: string;
     program_id: string;
     angkatan_id: string;
@@ -57,6 +60,9 @@ export default function PesertaDetailPage({ id, initialPendaftar, initialAngkata
     riwayat_penyakit: '',
     no_hp: '',
     email: '',
+    jenjang_pendidikan: '',
+    asal_sekolah: '',
+    tahun_lulus: '',
     jenis_pelatihan: '',
     program_id: '',
     angkatan_id: '',
@@ -76,9 +82,13 @@ export default function PesertaDetailPage({ id, initialPendaftar, initialAngkata
       if (pRes.success && pRes.data) {
         const p = pRes.data;
         setPendaftar(p);
-        if (p.alamat) {
-          setAlamatState(parseAlamat(p.alamat));
-        }
+        setAlamatState({
+          ...parseAlamat(p.alamat),
+          provinsi: p.provinsi || parseAlamat(p.alamat).provinsi || '',
+          kabupaten_kota: p.kabupaten_kota || parseAlamat(p.alamat).kabupaten_kota || '',
+          kecamatan: p.kecamatan || parseAlamat(p.alamat).kecamatan || '',
+          desa_kelurahan: p.desa_kelurahan || parseAlamat(p.alamat).desa_kelurahan || '',
+        });
         setFormData({
           nama_lengkap: p.nama_lengkap || '',
           nik: p.nik || '',
@@ -91,6 +101,9 @@ export default function PesertaDetailPage({ id, initialPendaftar, initialAngkata
           riwayat_penyakit: p.riwayat_penyakit || '',
           no_hp: p.no_hp || '',
           email: p.email || '',
+          jenjang_pendidikan: p.jenjang_pendidikan || '',
+          asal_sekolah: p.asal_sekolah || '',
+          tahun_lulus: p.tahun_lulus ? String(p.tahun_lulus) : '',
           jenis_pelatihan: p.jenis_pelatihan || p.program?.nama || '',
           program_id: p.program_id || p.program?.id || '',
           angkatan_id: p.angkatan_id || '',
@@ -114,9 +127,13 @@ export default function PesertaDetailPage({ id, initialPendaftar, initialAngkata
   useEffect(() => {
     if (initialPendaftar) {
       setPendaftar(initialPendaftar);
-      if (initialPendaftar.alamat) {
-        setAlamatState(parseAlamat(initialPendaftar.alamat));
-      }
+      setAlamatState({
+        ...parseAlamat(initialPendaftar.alamat),
+        provinsi: initialPendaftar.provinsi || parseAlamat(initialPendaftar.alamat).provinsi || '',
+        kabupaten_kota: initialPendaftar.kabupaten_kota || parseAlamat(initialPendaftar.alamat).kabupaten_kota || '',
+        kecamatan: initialPendaftar.kecamatan || parseAlamat(initialPendaftar.alamat).kecamatan || '',
+        desa_kelurahan: initialPendaftar.desa_kelurahan || parseAlamat(initialPendaftar.alamat).desa_kelurahan || '',
+      });
       setFormData({
         nama_lengkap: initialPendaftar.nama_lengkap || '',
         nik: initialPendaftar.nik || '',
@@ -129,6 +146,9 @@ export default function PesertaDetailPage({ id, initialPendaftar, initialAngkata
         riwayat_penyakit: initialPendaftar.riwayat_penyakit || '',
         no_hp: initialPendaftar.no_hp || '',
         email: initialPendaftar.email || '',
+        jenjang_pendidikan: initialPendaftar.jenjang_pendidikan || '',
+        asal_sekolah: initialPendaftar.asal_sekolah || '',
+        tahun_lulus: initialPendaftar.tahun_lulus ? String(initialPendaftar.tahun_lulus) : '',
         jenis_pelatihan: initialPendaftar.jenis_pelatihan || '',
         program_id: initialPendaftar.program_id || '',
         angkatan_id: initialPendaftar.angkatan_id || '',
@@ -173,33 +193,40 @@ export default function PesertaDetailPage({ id, initialPendaftar, initialAngkata
         tempat_lahir: formData.tempat_lahir,
         tanggal_lahir: formData.tanggal_lahir,
         alamat: finalAlamat,
+        provinsi: alamatState.provinsi,
+        kabupaten_kota: alamatState.kabupaten_kota,
+        kecamatan: alamatState.kecamatan,
+        desa_kelurahan: alamatState.desa_kelurahan,
         tinggi_badan: formData.tinggi_badan,
         berat_badan: formData.berat_badan,
         lingkar_pinggang: formData.lingkar_pinggang,
         riwayat_penyakit: formData.riwayat_penyakit,
         no_hp: formData.no_hp,
         email: formData.email,
+        jenjang_pendidikan: formData.jenjang_pendidikan || undefined,
+        asal_sekolah: formData.asal_sekolah || undefined,
+        tahun_lulus: formData.tahun_lulus ? Number(formData.tahun_lulus) : undefined,
         jenis_pelatihan: formData.jenis_pelatihan,
         program_id: formData.program_id || undefined,
       });
 
-      // 2. If status or physical measurements changed via status update
+      if (!res.success) {
+        showToast('error', res.error || 'Gagal memperbarui data.');
+        return;
+      }
+
+      // Perubahan status dan angkatan hanya dijalankan setelah data utama berhasil disimpan.
+      // Dengan demikian peserta berstatus "menunggu" tetap dapat diedit tanpa verifikasi.
       if (pendaftar && pendaftar.status !== formData.status) {
         await pendaftarApi.updateStatus(id, formData.status);
       }
-
-      // 3. If angkatan changed
       if (pendaftar && pendaftar.angkatan_id !== formData.angkatan_id && formData.angkatan_id) {
         await pendaftarApi.alokasiAngkatan(id, formData.angkatan_id);
       }
 
-      if (res.success) {
-        showToast('success', 'Data peserta berhasil diperbarui!');
-        setIsEditing(false);
-        loadData();
-      } else {
-        showToast('error', res.error || 'Gagal memperbarui data.');
-      }
+      showToast('success', 'Data peserta berhasil diperbarui!');
+      setIsEditing(false);
+      await loadData();
     } catch (err: any) {
       showToast('error', err.message || 'Terjadi kesalahan sistem saat menyimpan.');
     } finally {
@@ -265,6 +292,18 @@ export default function PesertaDetailPage({ id, initialPendaftar, initialAngkata
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans pb-16">
       <Navbar />
+
+      {saving && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/40 backdrop-blur-sm" role="status" aria-live="polite">
+          <div className="flex items-center gap-3 rounded-2xl bg-white px-6 py-5 shadow-2xl border border-slate-200">
+            <div className="w-6 h-6 border-3 border-indigo-600 border-t-transparent rounded-full animate-spin" />
+            <div>
+              <p className="text-sm font-bold text-slate-900">Menyimpan perubahan...</p>
+              <p className="text-xs text-slate-500">Data peserta sedang diperbarui.</p>
+            </div>
+          </div>
+        </div>
+      )}
 
       <main className="flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 py-6 space-y-6">
         {/* Toast Notification */}
@@ -805,12 +844,12 @@ export default function PesertaDetailPage({ id, initialPendaftar, initialAngkata
             </div>
           </div>
 
-          {/* SECTION 5: KONTAK */}
+          {/* SECTION 5: INFORMASI PRIBADI */}
           <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-xs space-y-4">
             <div className="flex items-center gap-2 border-b pb-3 border-slate-100">
               <div className="w-2 h-4 rounded-full bg-indigo-600" />
               <h2 className="text-xs font-bold uppercase tracking-wider text-slate-900">
-                5. Informasi Kontak
+                5. Informasi Pribadi
               </h2>
             </div>
 
@@ -852,6 +891,34 @@ export default function PesertaDetailPage({ id, initialPendaftar, initialAngkata
                 )}
               </div>
 
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div>
+                <label className="form-label block text-[11px] font-semibold text-slate-600 mb-1">Jenjang Pendidikan</label>
+                {isEditing ? (
+                  <select value={formData.jenjang_pendidikan} onChange={(e) => handleInputChange('jenjang_pendidikan', e.target.value)} className="form-input text-xs font-medium w-full">
+                    <option value="">Belum diisi</option>
+                    <option value="SMP/MTs">SMP/MTs</option>
+                    <option value="SMA/SMK/MA">SMA/SMK/MA</option>
+                    <option value="Diploma">Diploma</option>
+                    <option value="Sarjana (S1)">Sarjana (S1)</option>
+                    <option value="Magister (S2)">Magister (S2)</option>
+                  </select>
+                ) : <div className="text-sm text-slate-900 bg-slate-50 p-2.5 rounded-lg border border-slate-100">{pendaftar.jenjang_pendidikan || '-'}</div>}
+              </div>
+              <div>
+                <label className="form-label block text-[11px] font-semibold text-slate-600 mb-1">Asal Sekolah</label>
+                {isEditing ? (
+                  <input type="text" value={formData.asal_sekolah} onChange={(e) => handleInputChange('asal_sekolah', e.target.value)} className="form-input text-xs font-medium w-full" placeholder="Nama sekolah" />
+                ) : <div className="text-sm text-slate-900 bg-slate-50 p-2.5 rounded-lg border border-slate-100">{pendaftar.asal_sekolah || '-'}</div>}
+              </div>
+              <div>
+                <label className="form-label block text-[11px] font-semibold text-slate-600 mb-1">Tahun Lulus</label>
+                {isEditing ? (
+                  <input type="number" min="1900" max={new Date().getFullYear() + 1} value={formData.tahun_lulus} onChange={(e) => handleInputChange('tahun_lulus', e.target.value)} className="form-input text-xs font-medium w-full" placeholder="Contoh: 2024" />
+                ) : <div className="text-sm text-slate-900 bg-slate-50 p-2.5 rounded-lg border border-slate-100">{pendaftar.tahun_lulus || '-'}</div>}
+              </div>
             </div>
           </div>
 

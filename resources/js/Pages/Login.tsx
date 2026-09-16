@@ -55,9 +55,11 @@ export default function LoginPage() {
             router.visit('/admin/dashboard');
             return;
           } else if (role === 'HRD') {
+            sessionStorage.setItem('lpk_hrd_logged_in', 'true');
             router.visit('/hrd/dashboard');
             return;
           } else if (role === 'INSTRUKTUR') {
+            sessionStorage.setItem('lpk_instruktur_logged_in', 'true');
             router.visit('/instruktur/dashboard');
             return;
           } else {
@@ -89,11 +91,13 @@ export default function LoginPage() {
       }
     } else if (lowerIdentifier.includes('hrd')) {
       if (cleanPassword === 'password' || cleanPassword === 'admin123') {
+        sessionStorage.setItem('lpk_hrd_logged_in', 'true');
         router.visit('/hrd/dashboard');
         return;
       }
     } else if (lowerIdentifier.includes('instruktur')) {
       if (cleanPassword === 'password' || cleanPassword === 'admin123') {
+        sessionStorage.setItem('lpk_instruktur_logged_in', 'true');
         router.visit('/instruktur/dashboard');
         return;
       }

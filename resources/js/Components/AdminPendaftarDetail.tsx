@@ -30,6 +30,9 @@ export default function AdminPendaftarDetail({
   );
   const [editNoHp, setEditNoHp] = useState(initialPendaftar.no_hp || '');
   const [editEmail, setEditEmail] = useState(initialPendaftar.email || '');
+  const [editJenjangPendidikan, setEditJenjangPendidikan] = useState(initialPendaftar.jenjang_pendidikan || '');
+  const [editAsalSekolah, setEditAsalSekolah] = useState(initialPendaftar.asal_sekolah || '');
+  const [editTahunLulus, setEditTahunLulus] = useState(initialPendaftar.tahun_lulus ? String(initialPendaftar.tahun_lulus) : '');
   const [editAlamat, setEditAlamat] = useState(initialPendaftar.alamat || '');
   const [editMotivasi, setEditMotivasi] = useState(initialPendaftar.motivasi || '');
 
@@ -108,6 +111,9 @@ export default function AdminPendaftarDetail({
         tanggal_lahir: editTanggalLahir,
         no_hp: editNoHp,
         email: editEmail,
+        jenjang_pendidikan: editJenjangPendidikan || undefined,
+        asal_sekolah: editAsalSekolah || undefined,
+        tahun_lulus: editTahunLulus ? Number(editTahunLulus) : undefined,
         alamat: editAlamat,
         motivasi: editMotivasi,
       });
@@ -356,6 +362,46 @@ export default function AdminPendaftarDetail({
                   </div>
 
                   <div>
+                    <label className="form-label block font-bold text-slate-700 mb-1">Jenjang Pendidikan</label>
+                    <select
+                      value={editJenjangPendidikan}
+                      onChange={(e) => setEditJenjangPendidikan(e.target.value)}
+                      className="form-input w-full"
+                    >
+                      <option value="">Belum diisi</option>
+                      <option value="SMP/MTs">SMP/MTs</option>
+                      <option value="SMA/SMK/MA">SMA/SMK/MA</option>
+                      <option value="Diploma">Diploma</option>
+                      <option value="Sarjana (S1)">Sarjana (S1)</option>
+                      <option value="Magister (S2)">Magister (S2)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="form-label block font-bold text-slate-700 mb-1">Asal Sekolah</label>
+                    <input
+                      type="text"
+                      value={editAsalSekolah}
+                      onChange={(e) => setEditAsalSekolah(e.target.value)}
+                      className="form-input w-full"
+                      placeholder="Contoh: SMK Negeri 1 Garut"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="form-label block font-bold text-slate-700 mb-1">Tahun Lulus</label>
+                    <input
+                      type="number"
+                      min="1900"
+                      max={new Date().getFullYear() + 1}
+                      value={editTahunLulus}
+                      onChange={(e) => setEditTahunLulus(e.target.value)}
+                      className="form-input w-full"
+                      placeholder="Contoh: 2024"
+                    />
+                  </div>
+
+                  <div>
                     <label className="form-label block font-bold text-slate-700 mb-1">Alamat Lengkap *</label>
                     <textarea
                       value={editAlamat}
@@ -379,9 +425,12 @@ export default function AdminPendaftarDetail({
                   <button
                     type="submit"
                     disabled={savingDataDiri}
-                    className="w-full btn btn-primary btn-sm font-bold bg-indigo-600 hover:bg-indigo-700 text-white mt-2"
+                    className="w-full btn btn-primary btn-sm font-bold bg-indigo-600 hover:bg-indigo-700 text-white mt-2 flex items-center justify-center gap-1.5 disabled:opacity-75 disabled:cursor-not-allowed"
                   >
-                    {savingDataDiri ? 'Menyimpan Data...' : 'Simpan Perubahan Data Diri'}
+                    {savingDataDiri && (
+                      <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    )}
+                    {savingDataDiri ? 'Menyimpan Perubahan...' : 'Simpan Perubahan Data Diri'}
                   </button>
                 </form>
               ) : (
@@ -423,6 +472,21 @@ export default function AdminPendaftarDetail({
                     <div>
                       <span className="text-slate-400 block text-[10px] font-bold">EMAIL</span>
                       <span className="font-mono text-slate-800">{currentPendaftar.email}</span>
+                    </div>
+
+                    <div>
+                      <span className="text-slate-400 block text-[10px] font-bold">JENJANG PENDIDIKAN</span>
+                      <span className="font-medium text-slate-800">{currentPendaftar.jenjang_pendidikan || '-'}</span>
+                    </div>
+
+                    <div>
+                      <span className="text-slate-400 block text-[10px] font-bold">ASAL SEKOLAH</span>
+                      <span className="font-medium text-slate-800">{currentPendaftar.asal_sekolah || '-'}</span>
+                    </div>
+
+                    <div>
+                      <span className="text-slate-400 block text-[10px] font-bold">TAHUN LULUS</span>
+                      <span className="font-medium text-slate-800">{currentPendaftar.tahun_lulus || '-'}</span>
                     </div>
 
                     <div>
@@ -632,9 +696,12 @@ export default function AdminPendaftarDetail({
               type="button"
               onClick={handleVerifikasiDanTerima}
               disabled={loading}
-              className="btn btn-accent btn-sm bg-indigo-600 hover:bg-indigo-700 text-white border-indigo-600 font-bold px-6 py-2.5 text-xs shadow-md"
+              className="btn btn-accent btn-sm bg-indigo-600 hover:bg-indigo-700 text-white border-indigo-600 font-bold px-6 py-2.5 text-xs shadow-md flex items-center gap-1.5 disabled:opacity-75 disabled:cursor-not-allowed"
             >
-              {loading ? 'Memproses...' : 'Verifikasi & Terima Peserta (Masuk Jadwal)'}
+              {loading && (
+                <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+              )}
+              {loading ? 'Memproses Verifikasi...' : 'Verifikasi & Terima Peserta (Masuk Jadwal)'}
             </button>
           </div>
         </div>

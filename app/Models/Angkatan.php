@@ -21,7 +21,6 @@ class Angkatan extends Model
         'tanggal_mulai',
         'tanggal_selesai',
         'kuota',
-        'instruktur_nama',
         'status',
         'program_id',
     ];
@@ -40,6 +39,6 @@ class Angkatan extends Model
 
     public function pendaftar()
     {
-        return $this->hasMany(Pendaftar::class, 'angkatan_id');
+        return $this->hasMany(Pendaftar::class, 'angkatan_id')->where('status', 'diterima');
     }
 }

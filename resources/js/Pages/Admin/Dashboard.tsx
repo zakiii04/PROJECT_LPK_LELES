@@ -32,6 +32,7 @@ import {
   angkatanApi,
 } from '@/lib/api';
 import { getToken } from '@/lib/axios';
+import type { Pembayaran } from '@/lib/types';
 
 type AdminTab =
   | 'overview'
@@ -52,6 +53,8 @@ type FilterStatus = 'semua' | 'menunggu' | 'diterima' | 'ditolak';
 import ManualRegisterModal from '@/Components/ManualRegisterModal';
 import DeleteConfirmModal from '@/Components/DeleteConfirmModal';
 import VerifikasiPesertaModal from '@/Components/VerifikasiPesertaModal';
+import PaymentDetailModal from '@/Components/PaymentDetailModal';
+import ActionToast, { useActionToast } from '@/Components/ActionToast';
 
 interface AdminDashboardProps {
   initialPendaftarList?: Pendaftar[];
@@ -71,9 +74,15 @@ export default function AdminDashboardPage(props: AdminDashboardProps) {
   const [filter, setFilter] = useState<FilterStatus>('semua');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedPendaftar, setSelectedPendaftar] = useState<Pendaftar | null>(null);
+  const [selectedPaymentDetail, setSelectedPaymentDetail] = useState<{ pendaftar: Pendaftar; pembayaran: Pembayaran } | null>(null);
   const [verifikasiPendaftar, setVerifikasiPendaftar] = useState<Pendaftar | null>(null);
   const [isAuthed, setIsAuthed] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string; type: 'pendaftar' | 'jadwal' | 'soal' } | null>(null);
+  const { actionToast, showLoading, showSuccess, showError, hideToast } = useActionToast();
+  const [isDataRefreshing, setIsDataRefreshing] = useState(false);
+  const [isDeletingItem, setIsDeletingItem] = useState(false);
+  const [isSavingJadwal, setIsSavingJadwal] = useState(false);
+  const [isSavingSoal, setIsSavingSoal] = useState(false);
   const [paymentFilter, setPaymentFilter] = useState<'semua' | 'belum_bayar' | 'menunggu_konfirmasi' | 'lunas' | 'cicilan_sebagian'>('semua');
   const [dateFilter, setDateFilter] = useState<'semua' | '7' | '30' | '90' | 'custom'>('semua');
   const [startDate, setStartDate] = useState('');
@@ -121,7 +130,7 @@ export default function AdminDashboardPage(props: AdminDashboardProps) {
     endDate !== '';
 
   // State Filter Pembayaran
-  const [filterPaymentType, setFilterPaymentType] = useState<'semua' | 'lunas' | 'cicilan'>('semua');
+  const [filterPaymentType, setFilterPaymentType] = useState<'semua' | 'cash' | 'transfer'>('semua');
 
   // State Jadwal
   const [jadwalList, setJadwalList] = useState<JadwalPelatihan[]>(props.initialJadwalList || []);
@@ -175,6 +184,9 @@ export default function AdminDashboardPage(props: AdminDashboardProps) {
   const confirmDelete = async () => {
     if (!deleteTarget) return;
 
+    setIsDeletingItem(true);
+    showLoading('delete', `Menghapus ${deleteTarget.name}...`, 'Sedang menghapus data dari database...');
+
     try {
       if (deleteTarget.type === 'pendaftar') {
         await pendaftarApi.destroy(deleteTarget.id);
@@ -184,10 +196,15 @@ export default function AdminDashboardPage(props: AdminDashboardProps) {
         await soalApi.destroy(deleteTarget.id);
       }
 
+      const deletedName = deleteTarget.name;
       setDeleteTarget(null);
-      loadData();
-    } catch (err) {
+      await loadData();
+      showSuccess('delete', 'Data Berhasil Dihapus!', `"${deletedName}" telah berhasil dihapus dari sistem.`);
+    } catch (err: any) {
       console.error('Error deleting item:', err);
+      showError('Gagal Menghapus Data', err?.message || 'Terjadi kesalahan sistem saat menghapus data.');
+    } finally {
+      setIsDeletingItem(false);
     }
   };
 
@@ -226,36 +243,57 @@ export default function AdminDashboardPage(props: AdminDashboardProps) {
     e.preventDefault();
     if (!sPertanyaan || !sOpsiA || !sOpsiB || !sOpsiC || !sOpsiD) return;
 
-    const payload = {
-      jenis_pelatihan: sJenisPelatihan,
-      tipe: sTipe as any,
-      pertanyaan: sPertanyaan,
-      opsi: [sOpsiA, sOpsiB, sOpsiC, sOpsiD],
-      jawaban_benar: Number(sJawabanBenar),
-      gambar_soal: sGambarFile || undefined,
-    };
+    setIsSavingSoal(true);
+    const isEdit = Boolean(editingSoal);
+    showLoading(
+      isEdit ? 'edit' : 'add',
+      isEdit ? 'Memperbarui Soal Ujian...' : 'Menambahkan Soal Baru...',
+      'Sedang menyimpan ke bank soal...'
+    );
 
-    if (editingSoal) {
-      await soalApi.update(editingSoal.id, payload);
-    } else {
-      await soalApi.create(payload);
+    try {
+      const payload = {
+        jenis_pelatihan: sJenisPelatihan,
+        tipe: sTipe as any,
+        pertanyaan: sPertanyaan,
+        opsi: [sOpsiA, sOpsiB, sOpsiC, sOpsiD],
+        jawaban_benar: Number(sJawabanBenar),
+        gambar_soal: sGambarFile || undefined,
+      };
+
+      if (editingSoal) {
+        await soalApi.update(editingSoal.id, payload);
+      } else {
+        await soalApi.create(payload);
+      }
+
+      setEditingSoal(null);
+      setSPertanyaan('');
+      setSOpsiA('');
+      setSOpsiB('');
+      setSOpsiC('');
+      setSOpsiD('');
+      setSGambarFile(null);
+      setSGambarPreview(null);
+      setShowAddSoalModal(false);
+      await loadData();
+      showSuccess(
+        isEdit ? 'edit' : 'add',
+        isEdit ? 'Soal Ujian Berhasil Diperbarui!' : 'Soal Ujian Baru Berhasil Ditambahkan!',
+        'Bank soal ujian telah diperbarui.'
+      );
+    } catch (err: any) {
+      console.error('Error saving soal:', err);
+      showError('Gagal Menyimpan Soal', err?.message || 'Terjadi kesalahan sistem saat menyimpan soal.');
+    } finally {
+      setIsSavingSoal(false);
     }
-
-    setEditingSoal(null);
-    setSPertanyaan('');
-    setSOpsiA('');
-    setSOpsiB('');
-    setSOpsiC('');
-    setSOpsiD('');
-    setSGambarFile(null);
-    setSGambarPreview(null);
-    setShowAddSoalModal(false);
-    loadData();
   };
 
   const [programList, setProgramList] = useState<Program[]>(props.initialProgramList || []);
 
-  const loadData = useCallback(async () => {
+  const loadData = useCallback(async (silent = false) => {
+    if (!silent) setIsDataRefreshing(true);
     try {
       const [pendaftarRes, jadwalRes, soalRes, prgRes, angkRes] = await Promise.all([
         pendaftarApi.list({ per_page: 1000 }),
@@ -291,6 +329,8 @@ export default function AdminDashboardPage(props: AdminDashboardProps) {
       }
     } catch (error) {
       console.error('[Admin Dashboard loadData error]:', error);
+    } finally {
+      if (!silent) setIsDataRefreshing(false);
     }
   }, []);
 
@@ -322,8 +362,9 @@ export default function AdminDashboardPage(props: AdminDashboardProps) {
     return null;
   }
 
-  const handleStatusChange = () => {
-    loadData();
+  const handleStatusChange = async () => {
+    showSuccess('edit', 'Data Peserta Diperbarui!', 'Perubahan status dan data peserta berhasil disimpan.');
+    await loadData();
     setSelectedPendaftar(null);
   };
 
@@ -351,39 +392,52 @@ export default function AdminDashboardPage(props: AdminDashboardProps) {
     e.preventDefault();
     if (!jJudul || !jTanggal || !jJam || !jRuangan) return;
 
-    if (editingJadwal) {
-      await jadwalApi.update(editingJadwal.id, {
-        judul: jJudul,
-        jenis_pelatihan: jJenisPelatihan,
-        tanggal: jTanggal,
-        jam: jJam,
-        ruangan: jRuangan,
-        tempat_pelatihan: jTempatPelatihan,
-        pengajar: jPengajar,
-        jenis_sesi: jJenisSesi,
-        status: jStatus,
-      });
-    } else {
-      await jadwalApi.create({
-        judul: jJudul,
-        jenis_pelatihan: jJenisPelatihan,
-        tanggal: jTanggal,
-        jam: jJam,
-        ruangan: jRuangan,
-        tempat_pelatihan: jTempatPelatihan,
-        pengajar: jPengajar,
-        jenis_sesi: jJenisSesi,
-        status: jStatus,
-      });
-    }
+    setIsSavingJadwal(true);
+    const isEdit = Boolean(editingJadwal);
+    showLoading(
+      isEdit ? 'edit' : 'add',
+      isEdit ? 'Memperbarui Jadwal...' : 'Menambahkan Jadwal Baru...',
+      'Sedang memproses dan menyimpan ke sistem...'
+    );
 
-    setEditingJadwal(null);
-    setJJudul('');
-    setJTanggal('');
-    setJJam('');
-    setJRuangan('');
-    setShowAddJadwalModal(false);
-    loadData();
+    try {
+      const payload = {
+        judul: jJudul,
+        jenis_pelatihan: jJenisPelatihan,
+        tanggal: jTanggal,
+        jam: jJam,
+        ruangan: jRuangan,
+        tempat_pelatihan: jTempatPelatihan,
+        pengajar: jPengajar,
+        jenis_sesi: jJenisSesi,
+        status: jStatus,
+      };
+
+      if (editingJadwal) {
+        await jadwalApi.update(editingJadwal.id, payload);
+      } else {
+        await jadwalApi.create(payload);
+      }
+
+      const savedJudul = jJudul;
+      setEditingJadwal(null);
+      setJJudul('');
+      setJTanggal('');
+      setJJam('');
+      setJRuangan('');
+      setShowAddJadwalModal(false);
+      await loadData();
+      showSuccess(
+        isEdit ? 'edit' : 'add',
+        isEdit ? 'Jadwal Berhasil Diperbarui!' : 'Jadwal Baru Berhasil Ditambahkan!',
+        `Jadwal "${savedJudul}" telah tersimpan.`
+      );
+    } catch (err: any) {
+      console.error('Error saving jadwal:', err);
+      showError('Gagal Menyimpan Jadwal', err?.message || 'Terjadi kesalahan sistem saat menyimpan jadwal.');
+    } finally {
+      setIsSavingJadwal(false);
+    }
   };
 
   const handleTogglePesertaInJadwal = async (pendaftarId: string) => {
@@ -391,17 +445,29 @@ export default function AdminDashboardPage(props: AdminDashboardProps) {
 
     const currentPeserta = selectedJadwalForPlotting.peserta || [];
     const currentIds = currentPeserta.map((p) => typeof p === 'string' ? p : p.id);
+    const isRemoving = currentIds.includes(pendaftarId);
 
-    if (currentIds.includes(pendaftarId)) {
-      const res = await jadwalApi.removePeserta(selectedJadwalForPlotting.id, pendaftarId);
-      if (res.success) {
-        await loadData();
+    showLoading(
+      isRemoving ? 'delete' : 'add',
+      isRemoving ? 'Menghapus Peserta dari Jadwal...' : 'Menambahkan Peserta ke Jadwal...'
+    );
+
+    try {
+      if (isRemoving) {
+        const res = await jadwalApi.removePeserta(selectedJadwalForPlotting.id, pendaftarId);
+        if (res.success) {
+          await loadData();
+          showSuccess('delete', 'Peserta Dihapus dari Jadwal');
+        }
+      } else {
+        const res = await jadwalApi.addPeserta(selectedJadwalForPlotting.id, [pendaftarId]);
+        if (res.success) {
+          await loadData();
+          showSuccess('add', 'Peserta Ditambahkan ke Jadwal');
+        }
       }
-    } else {
-      const res = await jadwalApi.addPeserta(selectedJadwalForPlotting.id, [pendaftarId]);
-      if (res.success) {
-        await loadData();
-      }
+    } catch (err: any) {
+      showError('Gagal Memperbarui Jadwal', err?.message || 'Terjadi kesalahan sistem.');
     }
   };
 
@@ -428,6 +494,7 @@ export default function AdminDashboardPage(props: AdminDashboardProps) {
   const pendingValidationList = pendaftarList.filter((p) => p.status === 'menunggu');
   const pendingPaymentList = pendaftarList.filter(
     (p) => p.status === 'diterima' && (
+      p.tagihan?.pembayarans?.some((payment) => payment.status === 'menunggu_verifikasi') ||
       p.status_pembayaran === 'menunggu_konfirmasi' ||
       (p.status_pembayaran === 'cicilan_sebagian' && p.cicilan?.some(c => c.status === 'menunggu_konfirmasi'))
     )
@@ -509,9 +576,23 @@ export default function AdminDashboardPage(props: AdminDashboardProps) {
               : 'Anda yakin ingin menghapus soal'
         }
         itemName={deleteTarget?.name || null}
+        loading={isDeletingItem}
         onConfirm={confirmDelete}
-        onCancel={() => setDeleteTarget(null)}
+        onCancel={() => {
+          if (!isDeletingItem) setDeleteTarget(null);
+        }}
       />
+
+      {/* Action Toast Feedback */}
+      <ActionToast toast={actionToast} onClose={hideToast} />
+
+      {selectedPaymentDetail && (
+        <PaymentDetailModal
+          pendaftar={selectedPaymentDetail.pendaftar}
+          pembayaran={selectedPaymentDetail.pembayaran}
+          onClose={() => setSelectedPaymentDetail(null)}
+        />
+      )}
 
       <aside className={`admin-sidebar w-full lg:w-72 bg-white border-r border-slate-200 flex flex-col justify-between p-4 shadow-sm overflow-y-auto ${sidebarOpen ? 'is-open' : ''}`}>
         <div className="space-y-4">
@@ -606,7 +687,7 @@ export default function AdminDashboardPage(props: AdminDashboardProps) {
               items: [
                 {
                   id: 'kelola_pelatihan',
-                  label: 'Kelola Pelatihan',
+                  label: 'Kelola Program',
                   icon: (
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M22 10v6M2 10l10-5 10 5-10 5z" />
@@ -716,6 +797,8 @@ export default function AdminDashboardPage(props: AdminDashboardProps) {
                   key={item.id}
                   onClick={() => {
                     setActiveTab(item.id as AdminTab);
+                    setSelectedPendaftar(null);
+                    setVerifikasiPendaftar(null);
                     setSidebarOpen(false);
                   }}
                   className={`sidebar-link ${activeTab === item.id ? 'active' : ''}`}
@@ -750,7 +833,14 @@ export default function AdminDashboardPage(props: AdminDashboardProps) {
       {/* Main Content Workspace Area */}
       <div className="flex-1 lg:ml-0 flex flex-col min-w-0 min-h-screen">
         {/* Top Header Bar */}
-        <header className="h-16 bg-white border-b border-slate-200 px-4 sm:px-6 flex items-center justify-between flex-shrink-0 sticky top-0 z-20">
+        <header className="h-16 bg-white border-b border-slate-200 px-4 sm:px-6 flex items-center justify-between flex-shrink-0 sticky top-0 z-20 relative">
+          {/* Top Refreshing Indeterminate Line */}
+          {isDataRefreshing && (
+            <div className="absolute top-0 left-0 right-0 h-[3px] bg-indigo-100 overflow-hidden z-30">
+              <div className="h-full bg-gradient-to-r from-blue-600 via-indigo-500 to-blue-600 animate-progress-infinite" />
+            </div>
+          )}
+
           <div className="flex items-center gap-3">
             <button
               type="button"
@@ -774,6 +864,14 @@ export default function AdminDashboardPage(props: AdminDashboardProps) {
               </svg>
               <span>{new Date().toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</span>
             </div>
+
+            {/* Syncing Badge */}
+            {isDataRefreshing && (
+              <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-full animate-fade-in shadow-xs">
+                <div className="w-3 h-3 border-2 border-indigo-200 border-t-indigo-600 rounded-full animate-spin" />
+                <span>Menyinkronkan data...</span>
+              </div>
+            )}
           </div>
 
           <div className="flex items-center gap-2">
@@ -1264,8 +1362,8 @@ export default function AdminDashboardPage(props: AdminDashboardProps) {
                     {(
                       [
                         { key: 'semua', label: 'Semua' },
-                        { key: 'lunas', label: 'Bayar Lunas' },
-                        { key: 'cicilan', label: 'Cicilan 3x' },
+                        { key: 'cash', label: 'Cash' },
+                        { key: 'transfer', label: 'Transfer' },
                       ] as const
                     ).map((t) => (
                       <button
@@ -1283,8 +1381,8 @@ export default function AdminDashboardPage(props: AdminDashboardProps) {
               </div>
 
               {pendingPaymentList.filter((p) => {
-                if (filterPaymentType === 'lunas') return p.jenis_pembayaran !== 'cicilan';
-                if (filterPaymentType === 'cicilan') return p.jenis_pembayaran === 'cicilan';
+                if (filterPaymentType === 'cash') return p.tagihan?.pembayarans?.some((payment) => payment.status === 'menunggu_verifikasi' && payment.tipe_pembayaran === 'cash');
+                if (filterPaymentType === 'transfer') return p.tagihan?.pembayarans?.some((payment) => payment.status === 'menunggu_verifikasi' && payment.tipe_pembayaran === 'transfer');
                 return true;
               }).length === 0 ? (
                 <div className="text-center py-12 text-[var(--text-tertiary)] text-sm">
@@ -1309,8 +1407,8 @@ export default function AdminDashboardPage(props: AdminDashboardProps) {
                     <tbody className="divide-y divide-[var(--card-border)]">
                       {(() => {
                         const filteredPayments = pendingPaymentList.filter((p) => {
-                          if (filterPaymentType === 'lunas') return p.jenis_pembayaran !== 'cicilan';
-                          if (filterPaymentType === 'cicilan') return p.jenis_pembayaran === 'cicilan';
+                          if (filterPaymentType === 'cash') return p.tagihan?.pembayarans?.some((payment) => payment.status === 'menunggu_verifikasi' && payment.tipe_pembayaran === 'cash');
+                          if (filterPaymentType === 'transfer') return p.tagihan?.pembayarans?.some((payment) => payment.status === 'menunggu_verifikasi' && payment.tipe_pembayaran === 'transfer');
                           return true;
                         });
                         return filteredPayments.slice((pembayaranPage - 1) * PAGE_SIZE, pembayaranPage * PAGE_SIZE)
@@ -1320,6 +1418,9 @@ export default function AdminDashboardPage(props: AdminDashboardProps) {
                           const pendingCicilan = allCicilan.filter((c: Cicilan) => c.status === 'menunggu_konfirmasi');
                           const totalBiaya = p.program?.harga || p.biaya_pelatihan || 0;
                           const totalDibayar = allCicilan.filter((c: Cicilan) => c.status === 'lunas').reduce((acc: number, cur: Cicilan) => acc + (cur.jumlah || 0), 0);
+                          const latestPayment = p.tagihan?.pembayarans
+                            ?.filter((payment) => payment.status === 'menunggu_verifikasi')
+                            .sort((a, b) => new Date(b.tanggal_bayar).getTime() - new Date(a.tanggal_bayar).getTime())[0];
 
                           if (!isCicilan) {
                             // Single payment row
@@ -1332,21 +1433,25 @@ export default function AdminDashboardPage(props: AdminDashboardProps) {
                                 </td>
                                 <td className="px-4 py-3 text-[var(--text-secondary)]">{p.jenis_pelatihan}</td>
                                 <td className="px-4 py-3">
-                                  <span className="badge badge-pending text-[10px]">Lunas</span>
+                                  <span className="badge badge-pending text-[10px]">{latestPayment?.tipe_pembayaran === 'cash' ? 'Cash' : latestPayment?.tipe_pembayaran === 'transfer' ? 'Transfer' : 'Lunas'}</span>
                                 </td>
                                 <td className="px-4 py-3 font-bold text-[var(--text-primary)] font-mono whitespace-nowrap">
-                                  Rp {totalBiaya.toLocaleString('id-ID')}
+                                  Rp {Number(latestPayment?.nominal || totalBiaya).toLocaleString('id-ID', { maximumFractionDigits: 0 })}
                                 </td>
                                 <td className="px-4 py-3 text-[var(--text-secondary)] whitespace-nowrap">
-                                  {p.tanggal_bayar ? new Date(p.tanggal_bayar).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' }) : '-'}
-                                  {p.metode_pembayaran && (
-                                    <div className="text-[10px] text-[var(--text-tertiary)] mt-0.5">{p.metode_pembayaran}</div>
+                                  {latestPayment?.tanggal_bayar || p.tanggal_bayar ? new Date(latestPayment?.tanggal_bayar || p.tanggal_bayar!).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' }) : '-'}
+                                  {(latestPayment?.nama_pengirim || latestPayment?.nama_penerima || latestPayment?.metode_pembayaran || p.metode_pembayaran) && (
+                                    <div className="text-[10px] text-[var(--text-tertiary)] mt-0.5">
+                                      {latestPayment?.tipe_pembayaran === 'transfer'
+                                        ? `${latestPayment.nama_pengirim || '-'} (${latestPayment.jenis_pengirim || '-'})`
+                                        : latestPayment?.nama_penerima || latestPayment?.metode_pembayaran || p.metode_pembayaran}
+                                    </div>
                                   )}
                                 </td>
                                 <td className="px-4 py-3">
-                                  {p.bukti_pembayaran ? (
+                                  {latestPayment?.bukti_pembayaran || p.bukti_pembayaran ? (
                                     <img
-                                      src={p.bukti_pembayaran}
+                                      src={latestPayment?.bukti_pembayaran || p.bukti_pembayaran || ''}
                                       alt="Bukti"
                                       className="w-12 h-12 rounded-lg object-cover border border-[var(--card-border)] cursor-pointer hover:opacity-80 transition shadow-sm"
                                       onClick={() => setSelectedPendaftar(p)}
@@ -1358,13 +1463,17 @@ export default function AdminDashboardPage(props: AdminDashboardProps) {
                                 </td>
                                 <td className="px-4 py-3">
                                   <span className="text-[10px] font-bold px-2 py-1 rounded-full bg-amber-100 text-amber-700 whitespace-nowrap">
-                                    Menunggu Konfirmasi
+                                    {latestPayment?.status === 'menunggu_verifikasi' ? 'Menunggu Verifikasi' : 'Menunggu Konfirmasi'}
                                   </span>
                                 </td>
                                 <td className="px-4 py-3">
                                   <div className="flex items-center justify-center gap-1.5">
                                     <button
-                                      onClick={() => setSelectedPendaftar(p)}
+                                      onClick={() => {
+                                        if (latestPayment) {
+                                          setSelectedPaymentDetail({ pendaftar: p, pembayaran: latestPayment });
+                                        }
+                                      }}
                                       className="btn btn-outline btn-sm text-[10px] py-1 px-2 whitespace-nowrap"
                                       title="Lihat detail"
                                     >
@@ -1516,7 +1625,7 @@ export default function AdminDashboardPage(props: AdminDashboardProps) {
                       })()}
                     </tbody>
                   </table>
-                  <Pagination currentPage={pembayaranPage} totalItems={pendingPaymentList.filter((p) => { if (filterPaymentType === 'lunas') return p.jenis_pembayaran !== 'cicilan'; if (filterPaymentType === 'cicilan') return p.jenis_pembayaran === 'cicilan'; return true; }).length} pageSize={PAGE_SIZE} onPageChange={setPembayaranPage} />
+                  <Pagination currentPage={pembayaranPage} totalItems={pendingPaymentList.filter((p) => { if (filterPaymentType === 'cash') return p.tagihan?.pembayarans?.some((payment) => payment.status === 'menunggu_verifikasi' && payment.tipe_pembayaran === 'cash'); if (filterPaymentType === 'transfer') return p.tagihan?.pembayarans?.some((payment) => payment.status === 'menunggu_verifikasi' && payment.tipe_pembayaran === 'transfer'); return true; }).length} pageSize={PAGE_SIZE} onPageChange={setPembayaranPage} />
                 </div>
               )}
             </div>
@@ -1709,13 +1818,23 @@ export default function AdminDashboardPage(props: AdminDashboardProps) {
 
       {/* Modal Buat / Edit Jadwal Baru */}
       {showAddJadwalModal && (
-        <div className="modal-overlay" onClick={() => { setShowAddJadwalModal(false); setEditingJadwal(null); }}>
-          <div className="modal-content max-w-lg p-6" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-overlay" onClick={() => { if (!isSavingJadwal) { setShowAddJadwalModal(false); setEditingJadwal(null); } }}>
+          <div className="modal-content relative max-w-lg p-6 overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            {isSavingJadwal && (
+              <div className="absolute top-0 left-0 right-0 h-1 bg-indigo-100 overflow-hidden">
+                <div className="h-full bg-gradient-to-r from-blue-600 via-indigo-500 to-blue-600 animate-progress-infinite" />
+              </div>
+            )}
             <div className="flex justify-between items-center pb-3 border-b border-slate-100 mb-4">
               <h3 className="font-bold text-slate-800 text-sm">
                 {editingJadwal ? 'Edit Jadwal Pelatihan' : 'Buat Jadwal Pelatihan Baru'}
               </h3>
-              <button onClick={() => { setShowAddJadwalModal(false); setEditingJadwal(null); }} className="text-slate-400 hover:text-black">
+              <button
+                type="button"
+                disabled={isSavingJadwal}
+                onClick={() => { setShowAddJadwalModal(false); setEditingJadwal(null); }}
+                className="text-slate-400 hover:text-black disabled:opacity-40"
+              >
                 ✕
               </button>
             </div>
@@ -1836,9 +1955,25 @@ export default function AdminDashboardPage(props: AdminDashboardProps) {
               </div>
 
               <div className="flex justify-end gap-2 pt-3">
-                <button type="button" onClick={() => { setShowAddJadwalModal(false); setEditingJadwal(null); }} className="btn btn-outline btn-sm">Batal</button>
-                <button type="submit" className="btn btn-primary btn-sm">
-                  {editingJadwal ? 'Simpan Perubahan Jadwal' : 'Simpan Jadwal Baru'}
+                <button
+                  type="button"
+                  disabled={isSavingJadwal}
+                  onClick={() => { setShowAddJadwalModal(false); setEditingJadwal(null); }}
+                  className="btn btn-outline btn-sm disabled:opacity-50"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingJadwal}
+                  className="btn btn-primary btn-sm flex items-center gap-1.5 disabled:opacity-75 disabled:cursor-not-allowed"
+                >
+                  {isSavingJadwal && (
+                    <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  )}
+                  {isSavingJadwal
+                    ? (editingJadwal ? 'Memperbarui...' : 'Menyimpan...')
+                    : (editingJadwal ? 'Simpan Perubahan Jadwal' : 'Simpan Jadwal Baru')}
                 </button>
               </div>
             </form>
@@ -2073,13 +2208,25 @@ export default function AdminDashboardPage(props: AdminDashboardProps) {
 
       {/* Modal Tambah / Edit Soal Ujian */}
       {showAddSoalModal && (
-        <div className="modal-overlay" onClick={() => setShowAddSoalModal(false)}>
-          <div className="modal-content max-w-xl" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-overlay" onClick={() => { if (!isSavingSoal) setShowAddSoalModal(false); }}>
+          <div className="modal-content relative max-w-xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            {isSavingSoal && (
+              <div className="absolute top-0 left-0 right-0 h-1 bg-indigo-100 overflow-hidden">
+                <div className="h-full bg-gradient-to-r from-blue-600 via-indigo-500 to-blue-600 animate-progress-infinite" />
+              </div>
+            )}
             <div className="p-5 border-b border-[var(--card-border)] flex justify-between items-center">
               <h3 className="font-bold text-[var(--text-primary)] text-base">
                 {editingSoal ? 'Edit Soal Ujian' : 'Tambah Soal Ujian Baru'}
               </h3>
-              <button onClick={() => setShowAddSoalModal(false)} className="text-[var(--text-tertiary)] hover:text-black">✕</button>
+              <button
+                type="button"
+                disabled={isSavingSoal}
+                onClick={() => setShowAddSoalModal(false)}
+                className="text-[var(--text-tertiary)] hover:text-black disabled:opacity-40"
+              >
+                ✕
+              </button>
             </div>
             <form onSubmit={handleSaveSoal} className="p-5 space-y-4 max-h-[80vh] overflow-y-auto">
               <div className="grid grid-cols-2 gap-3">
@@ -2173,8 +2320,26 @@ export default function AdminDashboardPage(props: AdminDashboardProps) {
               </div>
 
               <div className="flex justify-end gap-2 pt-3">
-                <button type="button" onClick={() => setShowAddSoalModal(false)} className="btn btn-outline btn-sm">Batal</button>
-                <button type="submit" className="btn btn-primary btn-sm">Simpan Soal</button>
+                <button
+                  type="button"
+                  disabled={isSavingSoal}
+                  onClick={() => setShowAddSoalModal(false)}
+                  className="btn btn-outline btn-sm disabled:opacity-50"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingSoal}
+                  className="btn btn-primary btn-sm flex items-center gap-1.5 disabled:opacity-75 disabled:cursor-not-allowed"
+                >
+                  {isSavingSoal && (
+                    <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  )}
+                  {isSavingSoal
+                    ? (editingSoal ? 'Memperbarui...' : 'Menyimpan...')
+                    : (editingSoal ? 'Simpan Perubahan Soal' : 'Simpan Soal')}
+                </button>
               </div>
             </form>
           </div>
@@ -2185,7 +2350,10 @@ export default function AdminDashboardPage(props: AdminDashboardProps) {
       <ManualRegisterModal
         isOpen={showManualModal}
         onClose={() => setShowManualModal(false)}
-        onSuccess={() => loadData()}
+        onSuccess={async () => {
+          showSuccess('add', 'Peserta Berhasil Didaftarkan!', 'Data peserta baru telah masuk ke sistem.');
+          await loadData();
+        }}
       />
     </div>
   );

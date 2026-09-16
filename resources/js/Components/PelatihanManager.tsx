@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { programsApi } from '@/lib/api';
 import type { ProgramPelatihan } from '@/lib/types';
 import DeleteConfirmModal from '@/Components/DeleteConfirmModal';
+import ActionToast, { useActionToast } from '@/Components/ActionToast';
 
 interface PelatihanManagerProps {
   initialProgramList?: ProgramPelatihan[];
@@ -14,6 +15,9 @@ export default function PelatihanManager({ initialProgramList = [] }: PelatihanM
   const [showModal, setShowModal] = useState(false);
   const [editingProgram, setEditingProgram] = useState<ProgramPelatihan | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
+  const { actionToast, showLoading, showSuccess, showError, hideToast } = useActionToast();
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // Form states
   const [nama, setNama] = useState('');
@@ -60,30 +64,43 @@ export default function PelatihanManager({ initialProgramList = [] }: PelatihanM
     e.preventDefault();
     if (!nama || !deskripsi || !durasi || !harga) return;
 
+    setIsSubmitting(true);
+    const isEdit = Boolean(editingProgram);
+    showLoading(
+      isEdit ? 'edit' : 'add',
+      isEdit ? 'Memperbarui Program Pelatihan...' : 'Menambahkan Program Baru...',
+      'Sedang memproses dan menyimpan ke sistem...'
+    );
+
     try {
+      const payload = {
+        id: undefined as any,
+        nama,
+        deskripsi,
+        durasi,
+        harga: Number(harga),
+        harga_formatted: `Rp ${Number(harga).toLocaleString('id-ID')}`,
+      };
+
       if (editingProgram) {
-        await programsApi.update(editingProgram.id, {
-          nama,
-          deskripsi,
-          durasi,
-          harga: Number(harga),
-          harga_formatted: `Rp ${Number(harga).toLocaleString('id-ID')}`,
-        });
+        await programsApi.update(editingProgram.id, payload);
       } else {
-        await programsApi.create({
-          id: undefined as any,
-          nama,
-          deskripsi,
-          durasi,
-          harga: Number(harga),
-          harga_formatted: `Rp ${Number(harga).toLocaleString('id-ID')}`,
-        });
+        await programsApi.create(payload);
       }
 
+      const savedName = nama;
       setShowModal(false);
-      loadData();
-    } catch (e) {
+      await loadData();
+      showSuccess(
+        isEdit ? 'edit' : 'add',
+        isEdit ? 'Program Pelatihan Berhasil Diperbarui!' : 'Program Pelatihan Baru Berhasil Ditambahkan!',
+        `Program "${savedName}" telah tersimpan.`
+      );
+    } catch (e: any) {
       console.error(e);
+      showError('Gagal Menyimpan Program', e?.message || 'Terjadi kesalahan sistem.');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -93,12 +110,21 @@ export default function PelatihanManager({ initialProgramList = [] }: PelatihanM
 
   const confirmDelete = async () => {
     if (!deleteTarget) return;
+
+    setIsDeleting(true);
+    showLoading('delete', `Menghapus ${deleteTarget.name}...`, 'Sedang menghapus program dari sistem...');
+
     try {
       await programsApi.destroy(deleteTarget.id);
+      const deletedName = deleteTarget.name;
       setDeleteTarget(null);
-      loadData();
-    } catch (e) {
+      await loadData();
+      showSuccess('delete', 'Program Pelatihan Berhasil Dihapus!', `"${deletedName}" telah dihapus.`);
+    } catch (e: any) {
       console.error(e);
+      showError('Gagal Menghapus Program', e?.message || 'Terjadi kesalahan saat menghapus.');
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -180,13 +206,23 @@ export default function PelatihanManager({ initialProgramList = [] }: PelatihanM
 
       {/* Modal Form Tambah / Edit Program */}
       {showModal && (
-        <div className="modal-overlay" onClick={() => setShowModal(false)}>
-          <div className="modal-content max-w-lg p-6" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-overlay" onClick={() => { if (!isSubmitting) setShowModal(false); }}>
+          <div className="modal-content relative max-w-lg p-6 overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            {isSubmitting && (
+              <div className="absolute top-0 left-0 right-0 h-1 bg-emerald-100 overflow-hidden">
+                <div className="h-full bg-gradient-to-r from-emerald-500 to-teal-600 animate-progress-infinite" />
+              </div>
+            )}
             <div className="flex justify-between items-center pb-3 border-b border-slate-100 mb-4">
               <h3 className="font-bold text-slate-800 text-sm">
                 {editingProgram ? 'Edit Program Pelatihan' : 'Tambah Program Pelatihan Baru'}
               </h3>
-              <button onClick={() => setShowModal(false)} className="text-slate-400 hover:text-black">
+              <button
+                type="button"
+                disabled={isSubmitting}
+                onClick={() => setShowModal(false)}
+                className="text-slate-400 hover:text-black disabled:opacity-40"
+              >
                 ✕
               </button>
             </div>
@@ -241,11 +277,25 @@ export default function PelatihanManager({ initialProgramList = [] }: PelatihanM
               </div>
 
               <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
-                <button type="button" onClick={() => setShowModal(false)} className="btn btn-outline btn-sm">
+                <button
+                  type="button"
+                  disabled={isSubmitting}
+                  onClick={() => setShowModal(false)}
+                  className="btn btn-outline btn-sm disabled:opacity-50"
+                >
                   Batal
                 </button>
-                <button type="submit" className="btn btn-primary btn-sm">
-                  {editingProgram ? 'Simpan Perubahan' : 'Tambah Program'}
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="btn btn-primary btn-sm flex items-center gap-1.5 disabled:opacity-75 disabled:cursor-not-allowed"
+                >
+                  {isSubmitting && (
+                    <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  )}
+                  {isSubmitting
+                    ? (editingProgram ? 'Memperbarui...' : 'Menyimpan...')
+                    : (editingProgram ? 'Simpan Perubahan' : 'Tambah Program')}
                 </button>
               </div>
             </form>
@@ -258,9 +308,14 @@ export default function PelatihanManager({ initialProgramList = [] }: PelatihanM
         title="Hapus Program Pelatihan?"
         message="Anda yakin ingin menghapus program pelatihan"
         itemName={deleteTarget?.name || null}
+        loading={isDeleting}
         onConfirm={confirmDelete}
-        onCancel={() => setDeleteTarget(null)}
+        onCancel={() => {
+          if (!isDeleting) setDeleteTarget(null);
+        }}
       />
+
+      <ActionToast toast={actionToast} onClose={hideToast} />
     </div>
   );
 }

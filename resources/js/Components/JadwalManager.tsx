@@ -460,7 +460,7 @@ export default function JadwalManager({
           angkatan: ang,
           tempat_pelatihan: venue,
           ruangan: j.ruangan || 'Ruang Teori A',
-          pengajar: j.pengajar || ang.instruktur_nama || 'Hj. Siti Rahmah, S.Ds',
+          pengajar: j.pengajar || 'Hj. Siti Rahmah, S.Ds',
           schedules: [],
           pesertaCount: j.peserta_count || (j.peserta || []).length,
         });
@@ -485,7 +485,7 @@ export default function JadwalManager({
           angkatan: ang,
           tempat_pelatihan: defaultVenue,
           ruangan: 'Ruang Teori A',
-          pengajar: ang.instruktur_nama || 'Hj. Siti Rahmah, S.Ds',
+          pengajar: 'Hj. Siti Rahmah, S.Ds',
           schedules: [],
           pesertaCount: 0,
         });
@@ -577,7 +577,7 @@ export default function JadwalManager({
     setCAngkatanId(card.angkatan.id);
     setCTempatName(card.tempat_pelatihan);
     setCRuangan(card.ruangan || 'Ruang Teori A');
-    setCPengajar(card.pengajar || card.angkatan.instruktur_nama || 'Hj. Siti Rahmah, S.Ds');
+    setCPengajar(card.pengajar || 'Hj. Siti Rahmah, S.Ds');
     setShowCreateModal(true);
   };
 
@@ -748,7 +748,7 @@ export default function JadwalManager({
           jam: tmpl.jam,
           ruangan: tmpl.ruangan,
           tempat_pelatihan: venueName,
-          pengajar: ang.instruktur_nama || 'Hj. Siti Rahmah, S.Ds',
+          pengajar: 'Hj. Siti Rahmah, S.Ds',
           jenis_sesi: tmpl.sesi,
           status: 'akan_datang',
         });
@@ -942,7 +942,7 @@ export default function JadwalManager({
 
             <div className="p-3 rounded-xl bg-slate-50 border border-slate-100">
               <div className="text-[11px] text-slate-400 font-medium">Pengajar Utama</div>
-              <div className="font-bold text-slate-800 text-sm mt-0.5">{angSchedules[0]?.pengajar || ang.instruktur_nama}</div>
+              <div className="font-bold text-slate-800 text-sm mt-0.5">{angSchedules[0]?.pengajar || '-'}</div>
             </div>
 
             <div className="p-3 rounded-xl bg-slate-50 border border-slate-100">
@@ -1130,7 +1130,7 @@ export default function JadwalManager({
                       setSTanggal(ang.tanggal_mulai ? ang.tanggal_mulai.split('T')[0] : new Date().toISOString().split('T')[0]);
                       setSJam('08:00 - 12:00');
                       setSRuangan(room);
-                      setSPengajar(angSchedules[0]?.pengajar || ang.instruktur_nama || 'Hj. Siti Rahmah, S.Ds');
+                      setSPengajar(angSchedules[0]?.pengajar || 'Hj. Siti Rahmah, S.Ds');
                       setSJenisSesi('Teori');
                       setShowAddSessionModal(true);
                     }}
@@ -1582,7 +1582,7 @@ export default function JadwalManager({
                     <div className="flex"><span className="w-36 font-semibold">Tempat / Ruangan</span><span>: {venue} ({room})</span></div>
                   </div>
                   <div className="space-y-1">
-                    <div className="flex"><span className="w-36 font-semibold">Instruktur Pengajar</span><span>: {angSchedules[0]?.pengajar || ang.instruktur_nama || 'Hj. Siti Rahmah, S.Ds'}</span></div>
+                    <div className="flex"><span className="w-36 font-semibold">Instruktur Pengajar</span><span>: {angSchedules[0]?.pengajar || '-'}</span></div>
                     <div className="flex"><span className="w-36 font-semibold">Periode Pelatihan</span><span>: {formatDateOnly(ang.tanggal_mulai)} s.d. {formatDateOnly(ang.tanggal_selesai)}</span></div>
                     <div className="flex"><span className="w-36 font-semibold">Jumlah Peserta</span><span>: {(pulledParticipants.length > 0 ? pulledParticipants : angkatanCandidates).length} orang</span></div>
                   </div>
@@ -1718,7 +1718,7 @@ export default function JadwalManager({
                     <div>Garut, {new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}</div>
                     <div className="font-semibold">Instruktur / Pengajar Pelatihan</div>
                     <div className="mt-14 border-t border-black w-40 mx-auto"></div>
-                    <div className="font-semibold">({angSchedules[0]?.pengajar || ang.instruktur_nama || 'Hj. Siti Rahmah, S.Ds'})</div>
+                    <div className="font-semibold">({angSchedules[0]?.pengajar || '-'})</div>
                     <div>NIP. ___________________</div>
                   </div>
                 </div>

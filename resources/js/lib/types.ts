@@ -109,7 +109,6 @@ export interface Angkatan {
   tanggal_mulai: string;
   tanggal_selesai: string;
   kuota: number;
-  instruktur_nama: string;
   status: AngkatanStatus;
   program_id: string;
   created_at?: string;
@@ -129,7 +128,6 @@ export interface CreateAngkatanPayload {
   tanggal_mulai: string;
   tanggal_selesai: string;
   kuota?: number;
-  instruktur_nama: string;
   status?: AngkatanStatus;
   program_id: string;
 }
@@ -151,6 +149,10 @@ export interface Pendaftar {
   tempat_lahir: string;
   tanggal_lahir: string;
   alamat: string;
+  provinsi?: string | null;
+  kabupaten_kota?: string | null;
+  kecamatan?: string | null;
+  desa_kelurahan?: string | null;
   tinggi_badan: string;
   berat_badan: string;
   lingkar_pinggang: string;
@@ -158,6 +160,9 @@ export interface Pendaftar {
   berkas_verifikasi?: string[] | null;
   no_hp: string;
   email: string;
+  jenjang_pendidikan?: string | null;
+  asal_sekolah?: string | null;
+  tahun_lulus?: number | null;
   jenis_pelatihan: string;
   program_id: string | null;
   tempat_pelatihan?: string | null;
@@ -175,6 +180,7 @@ export interface Pendaftar {
   user?: User;
   interview?: Interview;
   cicilan?: Cicilan[];
+  tagihan?: Tagihan;
   kelulusan?: Kelulusan;
 }
 
@@ -184,12 +190,19 @@ export interface CreatePendaftarPayload {
   tempat_lahir: string;
   tanggal_lahir: string;
   alamat: string;
+  provinsi?: string;
+  kabupaten_kota?: string;
+  kecamatan?: string;
+  desa_kelurahan?: string;
   tinggi_badan: string;
   berat_badan: string;
   lingkar_pinggang: string;
   riwayat_penyakit?: string;
   no_hp: string;
   email: string;
+  jenjang_pendidikan?: string;
+  asal_sekolah?: string;
+  tahun_lulus?: number;
   jenis_pelatihan: string;
   program_id?: string;
   motivasi: string;
@@ -217,6 +230,34 @@ export interface Cicilan {
 export interface CreateCicilanPayload {
   jumlah_per_termin: number;
   jumlah_termin: 2 | 3;
+}
+
+export type TagihanStatus = 'belum_lunas' | 'lunas';
+export type PembayaranStatus = 'menunggu_verifikasi' | 'diterima' | 'ditolak';
+
+export interface Pembayaran {
+  id: string;
+  tagihan_id: string;
+  nominal: number;
+  tipe_pembayaran: 'cash' | 'transfer';
+  nama_penerima: string | null;
+  nama_pengirim: string | null;
+  jenis_pengirim: string | null;
+  payment_method_id: string | null;
+  metode_pembayaran: string | null;
+  bukti_pembayaran: string | null;
+  status: PembayaranStatus;
+  tanggal_bayar: string;
+  tanggal_verifikasi: string | null;
+  catatan_admin: string | null;
+}
+
+export interface Tagihan {
+  id: string;
+  pendaftar_id: string;
+  nominal: number;
+  status: TagihanStatus;
+  pembayarans?: Pembayaran[];
 }
 
 // --- Payment Methods ---
@@ -486,6 +527,9 @@ export interface PendaftarFormData {
   riwayat_penyakit?: string;
   no_hp: string;
   email: string;
+  jenjang_pendidikan?: string;
+  asal_sekolah?: string;
+  tahun_lulus?: string;
   jenis_pelatihan: string;
   program_id?: string;
   tempat_pelatihan?: string;
@@ -573,4 +617,3 @@ export interface AbsensiData {
   hasil_pretest: Record<string, HasilUjian>;
   kehadiran: Record<string, AbsensiKehadiran>;
 }
-

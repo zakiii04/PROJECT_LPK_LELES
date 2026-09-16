@@ -79,11 +79,18 @@ export default function ManualRegisterModal({ isOpen, onClose, onSuccess }: Manu
         tempat_lahir: tempatLahir,
         tanggal_lahir: tanggalLahir,
         alamat: finalAlamat,
+        provinsi: alamatState.provinsi,
+        kabupaten_kota: alamatState.kabupaten_kota,
+        kecamatan: alamatState.kecamatan,
+        desa_kelurahan: alamatState.desa_kelurahan,
         tinggi_badan: '165',
         berat_badan: '60',
         lingkar_pinggang: '75',
         no_hp: noHp,
         email: email || `${nik}@lpk.com`,
+        jenjang_pendidikan: 'SMA/SMK/MA',
+        asal_sekolah: 'Belum diisi',
+        tahun_lulus: new Date().getFullYear(),
         jenis_pelatihan: jenisPelatihan || 'Menjahit',
         program_id: selectedProg?.id,
         motivasi: 'Pendaftaran manual oleh Admin.',
@@ -110,8 +117,20 @@ export default function ManualRegisterModal({ isOpen, onClose, onSuccess }: Manu
             </svg>
             <h3 className="font-bold text-base">Pendaftaran Peserta Manual</h3>
           </div>
-          <button onClick={onClose} className="text-white/80 hover:text-white text-lg font-bold">✕</button>
+          <button
+            type="button"
+            disabled={isSubmitting}
+            onClick={onClose}
+            className="text-white/80 hover:text-white text-lg font-bold disabled:opacity-40"
+          >
+            ✕
+          </button>
         </div>
+        {isSubmitting && (
+          <div className="h-1 bg-indigo-950 overflow-hidden">
+            <div className="h-full bg-gradient-to-r from-blue-400 via-white to-blue-400 animate-progress-infinite" />
+          </div>
+        )}
 
         {/* Form Body */}
         <form onSubmit={handleSubmit} className="p-6 space-y-5 max-h-[75vh] overflow-y-auto">
@@ -254,15 +273,23 @@ export default function ManualRegisterModal({ isOpen, onClose, onSuccess }: Manu
 
           {/* Footer Buttons */}
           <div className="pt-4 flex items-center justify-end gap-2 border-t border-slate-100">
-            <button type="button" onClick={onClose} className="btn btn-secondary text-xs px-4">
+            <button
+              type="button"
+              disabled={isSubmitting}
+              onClick={onClose}
+              className="btn btn-secondary text-xs px-4 disabled:opacity-50"
+            >
               Batal
             </button>
             <button
               type="submit"
               disabled={isSubmitting}
-              className="btn btn-primary text-xs px-5 bg-indigo-600 hover:bg-indigo-700 text-white"
+              className="btn btn-primary text-xs px-5 bg-indigo-600 hover:bg-indigo-700 text-white flex items-center gap-1.5 disabled:opacity-75 disabled:cursor-not-allowed"
             >
-              {isSubmitting ? 'Mendaftarkan...' : '+ Simpan & Daftarkan Peserta'}
+              {isSubmitting && (
+                <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+              )}
+              {isSubmitting ? 'Mendaftarkan Peserta...' : '+ Simpan & Daftarkan Peserta'}
             </button>
           </div>
         </form>
