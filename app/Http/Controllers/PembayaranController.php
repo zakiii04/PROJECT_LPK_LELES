@@ -155,6 +155,69 @@ class PembayaranController extends Controller
         }
     }
 
+    /**
+     * Pembayaran MANUAL oleh admin (mis. terima cash/offline langsung).
+     * Beda dengan store(): bukti tidak wajib, status langsung `diterima`
+     * dan sisa tagihan langsung berkurang — tanpa antre validasi.
+     */
+    public function storeManual(Request $request, string $pendaftarId)
+    {
+        $tagihan = $this->getOrCreateTagihan($pendaftarId);
+        $validated = $request->validate([
+            'nominal' => 'required|numeric|min:1|max:' . max((float) $tagihan->nominal, 1),
+            'tipe_pembayaran' => 'required|in:cash,transfer',
+            'nama_penerima' => 'required_if:tipe_pembayaran,cash|nullable|string|max:255',
+            'nama_pengirim' => 'required_if:tipe_pembayaran,transfer|nullable|string|max:255',
+            'jenis_pengirim' => 'required_if:tipe_pembayaran,transfer|nullable|string|max:100',
+            'payment_method_id' => 'required_if:tipe_pembayaran,transfer|nullable|exists:payment_methods,id',
+            'metode_pembayaran' => 'nullable|string|max:255',
+            'bukti_pembayaran' => 'nullable|file|image|max:5120',
+            'tanggal_bayar' => 'nullable|date',
+            'catatan_admin' => 'nullable|string|max:1000',
+        ]);
+
+        $sisa = (float) $tagihan->nominal;
+        if ((float) $validated['nominal'] > $sisa) {
+            return response()->json(['success' => false, 'message' => 'Nominal melebihi sisa tagihan.'], 422);
+        }
+
+        if ($request->hasFile('bukti_pembayaran')) {
+            $path = $request->file('bukti_pembayaran')->store('bukti', 'public');
+            $validated['bukti_pembayaran'] = asset('storage/' . $path);
+        }
+
+        $paymentMethod = $validated['payment_method_id'] ?? null;
+        $paymentMethodModel = $paymentMethod ? \App\Models\PaymentMethod::find($paymentMethod) : null;
+        $validated['metode_pembayaran'] = $paymentMethodModel?->nama_metode
+            ?? ($validated['metode_pembayaran'] ?? ($validated['tipe_pembayaran'] === 'cash' ? 'Cash' : 'Transfer'));
+        $validated['tagihan_id'] = $tagihan->id;
+        $validated['tanggal_bayar'] = !empty($validated['tanggal_bayar'])
+            ? \Carbon\Carbon::parse($validated['tanggal_bayar'])
+            : now();
+        unset($validated['payment_method_id']);
+
+        DB::beginTransaction();
+        try {
+            $pembayaran = Pembayaran::create(array_merge($validated, ['payment_method_id' => $paymentMethod]));
+            // Langsung diterima + kurangi sisa tagihan (tanpa antre validasi).
+            $this->applyPenerimaan($pembayaran, false);
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Pembayaran manual berhasil dicatat.',
+                'data' => $pembayaran->fresh()->load(['paymentMethod', 'tagihan']),
+            ], 201);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json([
+                'success' => false,
+                'message' => 'Terjadi kesalahan saat mencatat pembayaran manual.',
+                'error' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
     /** Validasi (terima) pembayaran terbaru yang menunggu. Nominal tagihan berkurang. */
     public function verify(string $pendaftarId)
     {

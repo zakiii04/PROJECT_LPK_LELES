@@ -1,8 +1,8 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { angkatanApi, pendaftarApi, programApi, kelulusanApi } from '@/lib/api';
-import type { Angkatan, Pendaftar, AngkatanStatus, Program } from '@/lib/types';
+import { angkatanApi, pendaftarApi, programApi, kelulusanApi, jadwalApi, penyelesaianApi } from '@/lib/api';
+import type { Angkatan, Pendaftar, AngkatanStatus, Program, JadwalPelatihan, PenyelesaianKelas } from '@/lib/types';
 import { isAnggotaAngkatan, getStatusBadgeClass, getStatusLabel } from '@/lib/storage';
 import AdminPendaftarDetail from '@/Components/AdminPendaftarDetail';
 import DeleteConfirmModal from '@/Components/DeleteConfirmModal';
@@ -55,6 +55,13 @@ export default function AngkatanManager({
   const [isDeleting, setIsDeleting] = useState(false);
   const [selectedAngkatanForCompletion, setSelectedAngkatanForCompletion] = useState<Angkatan | null>(null);
   const [completionPeserta, setCompletionPeserta] = useState<Pendaftar[]>([]);
+  // Tempat kelas yang sedang diselesaikan (null = mode lama per-angkatan penuh).
+  const [completionTempat, setCompletionTempat] = useState<string | null>(null);
+  const [completionTanpaTempat, setCompletionTanpaTempat] = useState(0);
+
+  // Jadwal seluruh angkatan + catatan kelas yang sudah selesai.
+  const [jadwalList, setJadwalList] = useState<JadwalPelatihan[]>([]);
+  const [penyelesaianList, setPenyelesaianList] = useState<PenyelesaianKelas[]>([]);
   const [lulusPesertaIds, setLulusPesertaIds] = useState<Set<string>>(new Set());
   const [isCompleting, setIsCompleting] = useState(false);
 
@@ -103,7 +110,24 @@ export default function AngkatanManager({
     if (initialAngkatanList.length === 0 || initialProgramList.length === 0) {
       loadData();
     }
+    // Data kelas (jadwal + penyelesaian) selalu dimuat — tidak ikut props awal.
+    loadKelasData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialAngkatanList, initialPendaftarList, initialProgramList]);
+
+  // Jadwal + status selesai per-kelas (dipakai blok Kelas di tiap kartu).
+  const loadKelasData = useCallback(async () => {
+    try {
+      const [jRes, sRes] = await Promise.all([
+        jadwalApi.list().catch(() => null),
+        penyelesaianApi.list().catch(() => null),
+      ]);
+      setJadwalList((jRes as any)?.data || []);
+      setPenyelesaianList((sRes as any)?.data || []);
+    } catch (err) {
+      console.error('Error loading kelas data:', err);
+    }
+  }, []);
 
   const handleOpenViewPeserta = async (ang: Angkatan) => {
     setSelectedAngkatanForViewPeserta(ang);
@@ -134,17 +158,55 @@ export default function AngkatanManager({
     return endDate.getTime() < Date.now();
   };
 
-  const handleOpenCompletion = async (ang: Angkatan) => {
+  // Lepas peserta dari angkatan secara tuntas (keluar dari kelas):
+  // angkatan_id dikosongkan + seluruh pivot sesi dilepas. Riwayat
+  // nilai/ujian/pembayaran tetap utuh dan bisa dialokasikan ulang.
+  const [lepasTarget, setLepasTarget] = useState<Pendaftar | null>(null);
+  const [isLepas, setIsLepas] = useState(false);
+
+  const confirmLepasDariAngkatan = async () => {
+    if (!lepasTarget || !selectedAngkatanForViewPeserta) return;
+    setIsLepas(true);
+    try {
+      const res = await pendaftarApi.alokasiAngkatan(lepasTarget.id, null);
+      if (!res.success) throw new Error(res.error || 'Gagal melepas peserta dari angkatan.');
+      setViewPesertaList((prev) => prev.filter((p) => p.id !== lepasTarget.id));
+      setLepasTarget(null);
+      await loadData();
+      showSuccess('edit', 'Peserta Dilepas!', `${lepasTarget.nama_lengkap} keluar dari angkatan & hilang dari daftar instruktur.`);
+    } catch (err: any) {
+      showError('Gagal Melepas Peserta', err?.message || 'Terjadi kesalahan sistem.');
+    } finally {
+      setIsLepas(false);
+    }
+  };
+
+  const handleOpenCompletion = async (ang: Angkatan, tempat?: string | null) => {
     setSelectedAngkatanForCompletion(ang);
+    setCompletionTempat(tempat ?? null);
     try {
       const res = await angkatanApi.getPendaftar(ang.id);
-      const peserta = (res.data || []).filter((p: Pendaftar) => p.status === 'diterima');
-      setCompletionPeserta(peserta);
-      setLulusPesertaIds(new Set(peserta.map((p: Pendaftar) => p.id)));
+      const semua = (res.data || []).filter((p: Pendaftar) => p.status === 'diterima');
+      if (tempat) {
+        const target = normTempat(tempat);
+        setCompletionPeserta(semua.filter((p: Pendaftar) => normTempat(p.tempat_pelatihan) === target));
+        setCompletionTanpaTempat(semua.filter((p: Pendaftar) => !(p.tempat_pelatihan || '').trim()).length);
+      } else {
+        setCompletionTanpaTempat(0);
+        setCompletionPeserta(semua);
+      }
+      setLulusPesertaIds(new Set(semua.map((p: Pendaftar) => p.id)));
     } catch {
-      const peserta = pendaftarList.filter((p) => p.angkatan_id === ang.id && p.status === 'diterima');
-      setCompletionPeserta(peserta);
-      setLulusPesertaIds(new Set(peserta.map((p) => p.id)));
+      const semua = pendaftarList.filter((p) => p.angkatan_id === ang.id && p.status === 'diterima');
+      if (tempat) {
+        const target = normTempat(tempat);
+        setCompletionPeserta(semua.filter((p) => normTempat(p.tempat_pelatihan) === target));
+        setCompletionTanpaTempat(semua.filter((p) => !(p.tempat_pelatihan || '').trim()).length);
+      } else {
+        setCompletionTanpaTempat(0);
+        setCompletionPeserta(semua);
+      }
+      setLulusPesertaIds(new Set(semua.map((p) => p.id)));
     }
   };
 
@@ -162,15 +224,72 @@ export default function AngkatanManager({
       if (results.some((result) => !result.success)) {
         throw new Error(results.find((result) => !result.success)?.error || 'Sebagian data kelulusan gagal disimpan.');
       }
-      await angkatanApi.updateStatus(selectedAngkatanForCompletion.id, 'Selesai');
-      setSelectedAngkatanForCompletion(null);
-      await loadData();
-      showSuccess('edit', 'Angkatan Diselesaikan', 'Kelulusan tersimpan. Peserta yang lulus otomatis berstatus Lulus dan tetap tercatat di angkatan.');
+      if (completionTempat) {
+        // Selesaikan SATU kelas — backend otomatis menyelesaikan angkatan
+        // bila seluruh kelasnya sudah selesai.
+        const sel = await penyelesaianApi.selesaikan({
+          angkatan_id: selectedAngkatanForCompletion.id,
+          tempat_pelatihan: completionTempat,
+        });
+        if (!sel.success) throw new Error(sel.error || 'Gagal menyimpan penyelesaian kelas.');
+        setSelectedAngkatanForCompletion(null);
+        setCompletionTempat(null);
+        await loadData();
+        await loadKelasData();
+        showSuccess(
+          'edit',
+          sel.data?.angkatan_selesai ? 'Angkatan Otomatis Selesai!' : 'Kelas Diselesaikan!',
+          sel.message || 'Kelulusan kelas tersimpan.',
+        );
+      } else {
+        await angkatanApi.updateStatus(selectedAngkatanForCompletion.id, 'Selesai');
+        setSelectedAngkatanForCompletion(null);
+        setCompletionTempat(null);
+        await loadData();
+        showSuccess('edit', 'Angkatan Diselesaikan', 'Kelulusan tersimpan. Peserta yang lulus otomatis berstatus Lulus dan tetap tercatat di angkatan.');
+      }
     } catch (err: any) {
       showError('Gagal Menyelesaikan Angkatan', err?.message || 'Kelulusan peserta belum tersimpan.');
     } finally {
       setIsCompleting(false);
     }
+  };
+
+  // Normalisasi nama tempat: "Gedung X (Jl. ...)" -> "gedung x"
+  // (pola yang sama dipakai backend saat mencocokkan sesi).
+  const normTempat = (t?: string | null) => (t || '').split(' (')[0].trim().toLowerCase();
+
+  const todayLocal = () => {
+    const d = new Date();
+    const m = `${d.getMonth() + 1}`.padStart(2, '0');
+    const day = `${d.getDate()}`.padStart(2, '0');
+    return `${d.getFullYear()}-${m}-${day}`;
+  };
+
+  // Daftar kelas (per tempat) suatu angkatan beserta tanggal sesi terakhir
+  // dan status penyelesaiannya.
+  const kelasOfAngkatan = (angId: string) => {
+    const map = new Map<string, JadwalPelatihan[]>();
+    for (const j of jadwalList) {
+      if (j.angkatan_id !== angId || !j.tempat_pelatihan) continue;
+      const arr = map.get(j.tempat_pelatihan) || [];
+      arr.push(j);
+      map.set(j.tempat_pelatihan, arr);
+    }
+    return [...map.entries()].map(([tempat, sessions]) => {
+      const dates = sessions
+        .map((s) => String(s.tanggal || '').split('T')[0])
+        .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d))
+        .sort();
+      return {
+        tempat,
+        sessions,
+        lastTanggal: dates.length > 0 ? dates[dates.length - 1] : null as string | null,
+        selesai: penyelesaianList.some(
+          (s) => s.angkatan_id === angId && s.tempat_pelatihan === tempat,
+        ),
+      };
+    });
   };
 
   const handleOpenAddModal = () => {
@@ -281,6 +400,11 @@ export default function AngkatanManager({
 
   const handleTogglePesertaInAngkatan = async (pendaftarId: string) => {
     if (!selectedAngkatanForPlotting) return;
+    const freshStatus = angkatanList.find((a) => a.id === selectedAngkatanForPlotting.id)?.status;
+    if (freshStatus === 'Selesai' || selectedAngkatanForPlotting.status === 'Selesai') {
+      showError('Angkatan Selesai', 'Plotting dikunci — angkatan ini sudah diselesaikan.');
+      return;
+    }
 
     try {
       await pendaftarApi.alokasiAngkatan(pendaftarId, selectedAngkatanForPlotting.id);
@@ -434,6 +558,55 @@ export default function AngkatanManager({
                     />
                   </div>
                 </div>
+
+                {/* Kelas per Tempat + Penyelesaian per-kelas */}
+                {(() => {
+                  const kelasList = kelasOfAngkatan(ang.id);
+                  if (kelasList.length === 0) return null;
+                  const today = todayLocal();
+                  return (
+                    <div className="rounded-xl border border-slate-200/80 bg-slate-50/60 overflow-hidden">
+                      <div className="px-3 py-2 text-[10px] font-extrabold uppercase tracking-wider text-slate-500 bg-slate-100/70 border-b border-slate-200/70">
+                        Kelas Pelatihan ({kelasList.length} tempat)
+                      </div>
+                      <div className="divide-y divide-slate-200/70">
+                        {kelasList.map((k) => {
+                          const siap = !k.selesai && ang.status !== 'Selesai' && k.lastTanggal !== null && k.lastTanggal <= today;
+                          return (
+                            <div key={k.tempat} className="px-3 py-2.5 flex items-center justify-between gap-2 flex-wrap">
+                              <div className="min-w-0">
+                                <div className="text-xs font-bold text-slate-800 truncate" title={k.tempat}>
+                                  {k.tempat}
+                                </div>
+                                <div className="text-[11px] text-slate-500 font-mono">
+                                  {k.sessions.length} sesi • terakhir {k.lastTanggal ? formatDateOnly(k.lastTanggal) : '-'}
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                {k.selesai ? (
+                                  <span className="text-[10px] font-extrabold uppercase px-2.5 py-1 rounded-full bg-emerald-600 text-white">
+                                    ✓ Selesai
+                                  </span>
+                                ) : siap ? (
+                                  <button
+                                    onClick={() => handleOpenCompletion(ang, k.tempat)}
+                                    className="btn btn-sm text-[11px] font-bold bg-emerald-600 hover:bg-emerald-700 text-white"
+                                  >
+                                    Selesaikan Kelas
+                                  </button>
+                                ) : (
+                                  <span className="text-[10px] font-bold uppercase px-2.5 py-1 rounded-full bg-slate-100 text-slate-500 border border-slate-200">
+                                    {ang.status === 'Selesai' ? 'Selesai' : 'Berjalan'}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
 
               <div className="flex items-center justify-between pt-3 border-t border-[var(--card-border)] flex-wrap gap-2">
@@ -449,6 +622,7 @@ export default function AngkatanManager({
                     <span>Lihat Peserta ({filledCount})</span>
                   </button>
 
+                  {ang.status !== 'Selesai' && (
                   <button
                     onClick={() => setSelectedAngkatanForPlotting(ang)}
                     className="btn btn-outline btn-sm text-xs flex items-center gap-1 text-slate-700 hover:bg-slate-50 font-semibold"
@@ -459,7 +633,8 @@ export default function AngkatanManager({
                     </svg>
                     <span>Plotting</span>
                   </button>
-                  {isTrainingFinished(ang) && (
+                  )}
+                  {isTrainingFinished(ang) && ang.status !== 'Selesai' && kelasOfAngkatan(ang.id).length === 0 && (
                     <button onClick={() => handleOpenCompletion(ang)} className="btn btn-sm text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white">
                       Selesaikan Angkatan
                     </button>
@@ -477,11 +652,23 @@ export default function AngkatanManager({
       </div>
 
       {selectedAngkatanForCompletion && (
-        <div className="modal-overlay" onClick={() => !isCompleting && setSelectedAngkatanForCompletion(null)}>
+        <div className="modal-overlay" onClick={() => { if (!isCompleting) { setSelectedAngkatanForCompletion(null); setCompletionTempat(null); } }}>
           <div className="modal-content max-w-2xl p-6 space-y-4" onClick={(e) => e.stopPropagation()}>
             <div className="border-b pb-3">
-              <h3 className="font-bold text-slate-800">Selesaikan {selectedAngkatanForCompletion.nama_angkatan}</h3>
-              <p className="text-xs text-slate-500 mt-1">Centang peserta yang dinyatakan lulus. Peserta yang tidak dicentang akan disimpan sebagai tidak lulus.</p>
+              <h3 className="font-bold text-slate-800">
+                Selesaikan {selectedAngkatanForCompletion.nama_angkatan}
+                {completionTempat ? ` — ${completionTempat}` : ''}
+              </h3>
+              <p className="text-xs text-slate-500 mt-1">
+                {completionTempat
+                  ? 'Centang peserta kelas ini yang dinyatakan lulus. Bila seluruh kelas selesai, status angkatan otomatis menjadi Selesai.'
+                  : 'Centang peserta yang dinyatakan lulus. Peserta yang tidak dicentang akan disimpan sebagai tidak lulus.'}
+              </p>
+              {completionTempat && completionTanpaTempat > 0 && (
+                <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2 mt-2">
+                  {completionTanpaTempat} peserta belum punya tempat pelatihan — tetapkan tempatnya dulu via Detail Profil agar ikut terselesaikan.
+                </p>
+              )}
             </div>
             <div className="max-h-[50vh] overflow-y-auto space-y-2">
               {completionPeserta.map((p) => (
@@ -496,7 +683,7 @@ export default function AngkatanManager({
               {!completionPeserta.length && <p className="text-center text-xs text-slate-500 py-8">Tidak ada peserta diterima pada angkatan ini.</p>}
             </div>
             <div className="flex justify-end gap-3 border-t pt-4">
-              <button disabled={isCompleting} onClick={() => setSelectedAngkatanForCompletion(null)} className="btn btn-outline btn-sm">Batal</button>
+              <button disabled={isCompleting} onClick={() => { setSelectedAngkatanForCompletion(null); setCompletionTempat(null); }} className="btn btn-outline btn-sm">Batal</button>
               <button disabled={isCompleting || !completionPeserta.length} onClick={handleCompleteAngkatan} className="btn btn-sm bg-emerald-600 hover:bg-emerald-700 text-white font-bold disabled:opacity-60">
                 {isCompleting ? 'Menyimpan...' : 'Simpan Kelulusan & Selesaikan'}
               </button>
@@ -636,8 +823,9 @@ export default function AngkatanManager({
         </div>
       )}
 
-      {/* Modal Plotting Peserta ke Angkatan */}
-      {selectedAngkatanForPlotting && (
+      {/* Modal Plotting Peserta ke Angkatan — terkunci otomatis bila Selesai */}
+      {selectedAngkatanForPlotting &&
+        (angkatanList.find((a) => a.id === selectedAngkatanForPlotting.id)?.status || selectedAngkatanForPlotting.status) !== 'Selesai' && (
         <div className="modal-overlay" onClick={() => setSelectedAngkatanForPlotting(null)}>
           <div className="modal-content max-w-2xl p-6" onClick={(e) => e.stopPropagation()}>
             <div className="flex justify-between items-center pb-3 border-b border-slate-100 mb-4">
@@ -719,6 +907,8 @@ export default function AngkatanManager({
       {/* MODAL LIHAT DAFTAR PESERTA TERDAFTAR ANGKATAN */}
       {selectedAngkatanForViewPeserta && (() => {
         const ang = selectedAngkatanForViewPeserta;
+        // Status terbaru dari state (bisa berubah otomatis setelah kelas selesai).
+        const viewAngStatus = angkatanList.find((a) => a.id === ang.id)?.status || ang.status;
 
         return (
           <div className="modal-overlay" onClick={() => setSelectedAngkatanForViewPeserta(null)}>
@@ -796,6 +986,21 @@ export default function AngkatanManager({
                           </svg>
                           <span>Detail Profil</span>
                         </button>
+
+                        {viewAngStatus !== 'Selesai' && (
+                        <button
+                          onClick={() => setLepasTarget(p)}
+                          title="Lepas peserta dari angkatan ini (keluar dari kelas)"
+                          className="btn btn-outline btn-sm text-xs font-bold flex items-center gap-1 border-rose-200 text-rose-700 bg-rose-50 hover:bg-rose-100"
+                        >
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                            <polyline points="16 17 21 12 16 7" />
+                            <line x1="21" y1="12" x2="9" y2="12" />
+                          </svg>
+                          <span>Lepas</span>
+                        </button>
+                        )}
                       </div>
                     </div>
                   ))
@@ -803,6 +1008,7 @@ export default function AngkatanManager({
               </div>
 
               <div className="flex justify-between items-center pt-3 border-t border-slate-100">
+                {viewAngStatus !== 'Selesai' ? (
                 <button
                   onClick={() => {
                     const target = selectedAngkatanForViewPeserta;
@@ -813,6 +1019,9 @@ export default function AngkatanManager({
                 >
                   <span>Buka Form Plotting Peserta</span>
                 </button>
+                ) : (
+                  <span className="text-[11px] italic text-slate-400">Angkatan selesai — plotting dikunci.</span>
+                )}
 
                 <button onClick={() => setSelectedAngkatanForViewPeserta(null)} className="btn btn-primary btn-sm font-bold">
                   Tutup
@@ -842,6 +1051,19 @@ export default function AngkatanManager({
         onConfirm={confirmDelete}
         onCancel={() => {
           if (!isDeleting) setDeleteTarget(null);
+        }}
+      />
+
+      {/* Konfirmasi Lepas Peserta dari Angkatan */}
+      <DeleteConfirmModal
+        open={Boolean(lepasTarget)}
+        title="Lepas Peserta dari Angkatan?"
+        message="Peserta akan keluar dari kelas: angkatan dikosongkan & seluruh sesi dilepas sehingga hilang dari daftar instruktur. Riwayat nilai/ujian/pembayaran tetap tersimpan dan bisa dialokasikan ulang."
+        itemName={lepasTarget ? `${lepasTarget.nama_lengkap} (${lepasTarget.no_pendaftaran})` : null}
+        loading={isLepas}
+        onConfirm={confirmLepasDariAngkatan}
+        onCancel={() => {
+          if (!isLepas) setLepasTarget(null);
         }}
       />
 

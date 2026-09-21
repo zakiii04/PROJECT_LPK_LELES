@@ -18,12 +18,14 @@ class HasilUjian extends Model
         'benar',
         'salah',
         'total_soal',
+        'detail',
         'tanggal',
         'pendaftar_id',
     ];
 
     protected $casts = [
         'tanggal' => 'datetime',
+        'detail'  => 'array',
     ];
 
     public function pendaftar()

@@ -19,6 +19,10 @@ return Application::configure(basePath: dirname(__DIR__))
 
         $middleware->web(append: [
             \App\Http\Middleware\HandleInertiaRequests::class,
+            // Resolve Bearer token lebih dulu (identitas per-tab/per-peran).
+            // Inertia visit tidak membawa header ini sehingga render halaman
+            // tetap memakai cookie session seperti sebelumnya.
+            \App\Http\Middleware\ResolveUserFromToken::class,
         ]);
 
         $middleware->validateCsrfTokens(except: [
@@ -27,6 +31,9 @@ return Application::configure(basePath: dirname(__DIR__))
 
         $middleware->alias([
             'role' => \App\Http\Middleware\RoleMiddleware::class,
+            // Identitas API dari Bearer token per-peran (paralel antar-tab),
+            // tanpa mengutak-atik cookie session web yang dipakai bersama.
+            'token.user' => \App\Http\Middleware\ResolveUserFromToken::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

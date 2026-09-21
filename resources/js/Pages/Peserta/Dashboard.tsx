@@ -8,8 +8,8 @@ import TenggatBanner from '@/Components/TenggatBanner';
 import CalendarView from '@/Components/CalendarView';
 import JadwalTable from '@/Components/JadwalTable';
 import CertificateView from '@/Components/CertificateView';
-import { pendaftarApi, ujianApi } from '@/lib/api';
-import { getToken } from '@/lib/axios';
+import { pendaftarApi, ujianApi, authApi } from '@/lib/api';
+import { getToken, removeToken } from '@/lib/axios';
 import {
   getStatusPembayaranBadgeClass,
   getStatusPembayaranLabel,
@@ -45,13 +45,20 @@ export default function PesertaDashboardPage(props: PesertaDashboardProps) {
   const [examViewMode, setExamViewMode] = useState<'pretest' | 'posttest'>('pretest');
   const [activeExamType, setActiveExamType] = useState<'pretest' | 'posttest' | null>(null);
 
-  const loadPesertaData = useCallback(async () => {
+  const loadPesertaData = useCallback(async (serverPendaftar?: Pendaftar | null) => {
     const rawSession = sessionStorage.getItem('lpk_peserta_session');
-    const token = getToken();
+    const token = getToken('PESERTA');
 
     if (!rawSession || !token) {
+      // Tanpa sesi/token yang valid jangan pernah menampilkan data orang lain.
+      // Jika server mengirim prop (sesi cookie masih hidup), pakai itu; jika tidak, ke login.
+      if (serverPendaftar) {
+        setPendaftar(serverPendaftar);
+        setIsLoading(false);
+        return;
+      }
       sessionStorage.removeItem('lpk_peserta_session');
-      router.visit('/peserta/login');
+      router.visit('/login');
       return;
     }
 
@@ -59,11 +66,43 @@ export default function PesertaDashboardPage(props: PesertaDashboardProps) {
       const res = await pendaftarApi.me();
       const data = res.data;
       if (!data) {
+        // Token ada tapi backend 401/404: sesi kedaluwarsa atau akun tak ditemukan.
+        // Jangan fallback ke akun lain — paksa login ulang. Kecuali server prop
+        // cocok dengan sesi lokal, maka pertahankan agar tidak logout paksa.
+        if (serverPendaftar) {
+          try {
+            const sess = JSON.parse(rawSession);
+            const sessPendaftarId = sess?.pendaftar_id || sess?.pendaftarId;
+            const sessUserId = sess?.user_id || sess?.id;
+            if (
+              (sessPendaftarId && serverPendaftar.id === sessPendaftarId) ||
+              (serverPendaftar.user_id && sessUserId && serverPendaftar.user_id === sessUserId)
+            ) {
+              setPendaftar(serverPendaftar);
+              setIsLoading(false);
+              return;
+            }
+          } catch { /* abaikan, lanjut ke login */ }
+        }
         sessionStorage.removeItem('lpk_peserta_session');
-        router.visit('/peserta/login');
+        router.visit('/login');
         return;
       }
+      // Anti lintas-akun: jika server prop (Inertia) berbeda id dengan data
+      // milik token ini, menangkan data token (pemilik sesi yang sebenarnya).
+      if (serverPendaftar && serverPendaftar.id !== data.id) {
+        console.warn('[PesertaDashboard] initialPendaftar mismatch, memakai data sesi login.');
+      }
       setPendaftar(data);
+      // Sinkronkan sesi lokal ke pendaftar yang benar agar halaman Ujian konsisten
+      try {
+        const sess = JSON.parse(rawSession);
+        sessionStorage.setItem('lpk_peserta_session', JSON.stringify({
+          ...sess,
+          pendaftar_id: data.id,
+          user_id: (data as any).user_id || sess?.user_id || sess?.id,
+        }));
+      } catch { /* abaikan */ }
 
       const resJadwal = await pendaftarApi.meJadwal();
       if (resJadwal.success && resJadwal.data) setJadwalList(resJadwal.data);
@@ -74,25 +113,55 @@ export default function PesertaDashboardPage(props: PesertaDashboardProps) {
       const resKelulusan = await pendaftarApi.meKelulusan();
       if (resKelulusan.success && resKelulusan.data) setKelulusanRecord(resKelulusan.data);
     } catch {
-      router.visit('/peserta/login');
+      if (serverPendaftar && rawSession) {
+        // Jaringan/API gagal: prop cookie hanya boleh dipakai bila cocok
+        // dengan sesi lokal tab ini (anti lintas-akun antar-tab).
+        try {
+          const sess = JSON.parse(rawSession);
+          const sessPendaftarId = sess?.pendaftar_id || sess?.pendaftarId;
+          const sessUserId = sess?.user_id || sess?.id;
+          const match =
+            (sessPendaftarId && serverPendaftar.id === sessPendaftarId) ||
+            (serverPendaftar.user_id && sessUserId && serverPendaftar.user_id === sessUserId);
+          if (match) {
+            setPendaftar(serverPendaftar);
+            setJadwalList(props.initialJadwalList || []);
+            setHasilUjianList(props.initialHasilUjianList || []);
+            if (props.initialKelulusanRecord) setKelulusanRecord(props.initialKelulusanRecord);
+            setIsLoading(false);
+            return;
+          }
+        } catch { /* abaikan, lanjut ke login */ }
+      }
+      router.visit('/login');
     } finally {
       setIsLoading(false);
     }
   }, [router]);
 
   useEffect(() => {
+    // Selalu revalidasi ke /pendaftar/me (milik token) agar tidak pernah
+    // menampilkan akun peserta lain dari prop Inertia yang basi/salah.
     if (props.initialPendaftar) {
       setPendaftar(props.initialPendaftar);
       if (props.initialJadwalList) {
         setJadwalList(props.initialJadwalList);
       }
-      setIsLoading(false);
-    } else {
-      loadPesertaData();
+      if (props.initialHasilUjianList) {
+        setHasilUjianList(props.initialHasilUjianList);
+      }
+      if (props.initialKelulusanRecord) {
+        setKelulusanRecord(props.initialKelulusanRecord);
+      }
     }
+    loadPesertaData(props.initialPendaftar || null);
   }, [props.initialPendaftar, props.initialJadwalList, loadPesertaData]);
 
   const handleLogout = () => {
+    // Logout HANYA peran peserta: revoke token sendiri di server, hapus
+    // key peran sendiri. Peran lain di tab sebelah tetap login.
+    authApi.logout().catch(() => null);
+    removeToken('PESERTA');
     sessionStorage.removeItem('lpk_peserta_session');
     router.visit('/peserta/login');
   };

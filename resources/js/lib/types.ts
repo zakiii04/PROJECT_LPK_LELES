@@ -134,6 +134,24 @@ export interface CreateAngkatanPayload {
 
 export type UpdateAngkatanPayload = Partial<CreateAngkatanPayload>;
 
+// --- Penyelesaian Kelas (angkatan + tempat) ---
+
+export interface PenyelesaianKelas {
+  id: string;
+  angkatan_id: string;
+  tempat_pelatihan: string;
+  tanggal_selesai: string | null;
+  created_at?: string;
+  updated_at?: string;
+  angkatan?: Angkatan;
+}
+
+export interface CreatePenyelesaianPayload {
+  angkatan_id: string;
+  tempat_pelatihan: string;
+  tanggal_selesai?: string;
+}
+
 // --- Pendaftar ---
 
 export type PendaftarStatus = 'menunggu' | 'diterima' | 'ditolak' | 'lulus' | 'sudah_bekerja' | 'keluar';
@@ -415,6 +433,16 @@ export interface CreateSoalPayload {
 
 // --- Hasil Ujian ---
 
+export interface HasilUjianDetailItem {
+  soal_id: string;
+  pertanyaan: string;
+  opsi: string[];
+  gambar_soal?: string | null;
+  jawaban_peserta: number;
+  jawaban_benar: number | null;
+  benar: boolean;
+}
+
 export interface HasilUjian {
   id: string;
   tipe: TipeUjian;
@@ -422,6 +450,8 @@ export interface HasilUjian {
   benar: number;
   salah: number;
   total_soal: number;
+  detail?: HasilUjianDetailItem[] | null;
+  reconstructed?: boolean;
   tanggal: string;
   pendaftar_id: string;
   pendaftar?: Pendaftar;

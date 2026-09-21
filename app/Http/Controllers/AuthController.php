@@ -57,11 +57,21 @@ class AuthController extends Controller
         ]);
     }
 
+    /**
+     * Logout SATU peran: revoke token Bearer yang dipresentasikan + hapus
+     * session cookie. Tab peran LAIN tidak terganggu karena identitas mereka
+     * datang dari token masing-masing (lihat ResolveUserFromToken), bukan
+     * dari cookie bersama ini.
+     */
     public function logout(Request $request)
     {
+        // Token dari middleware (Bearer) — utama; fallback Sanctum guard.
+        $accessToken = $request->attributes->get('access_token');
         $user = $request->user() ?? auth()->user();
 
-        if ($user && method_exists($user, 'currentAccessToken') && $user->currentAccessToken()) {
+        if ($accessToken) {
+            $accessToken->delete();
+        } elseif ($user && method_exists($user, 'currentAccessToken') && $user->currentAccessToken()) {
             $user->currentAccessToken()->delete();
         }
 

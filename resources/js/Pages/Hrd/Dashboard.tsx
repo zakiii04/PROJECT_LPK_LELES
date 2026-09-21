@@ -5,7 +5,8 @@ import { router } from '@inertiajs/react';
 import Navbar from '@/Components/Navbar';
 import HrdInterviewForm from '@/Components/HrdInterviewForm';
 import { type Pendaftar, type Interview } from '@/lib/storage';
-import { pendaftarApi, interviewApi } from '@/lib/api';
+import { pendaftarApi, interviewApi, authApi } from '@/lib/api';
+import { getToken, removeToken, setRoleUser } from '@/lib/axios';
 
 type HrdFilter = 'semua' | 'perlu_jadwal' | 'terjadwal' | 'lulus' | 'tidak_lulus';
 
@@ -44,11 +45,37 @@ export default function HrdDashboardPage() {
       router.visit('/login');
       return;
     }
-    setIsAuthed(true);
-    loadData();
+    // Identitas HRD WAJIB dari token per-peran (cookie session dipakai
+    // bersama antar-tab sehingga tidak bisa dipercaya di sini).
+    if (!getToken('HRD')) {
+      router.visit('/login');
+      return;
+    }
+    (async () => {
+      try {
+        const meRes = await authApi.me();
+        const meUser = (meRes as any)?.data;
+        if (!meRes.success || !meUser || (meUser.role || '').toUpperCase() !== 'HRD') {
+          removeToken('HRD');
+          sessionStorage.removeItem('lpk_hrd_logged_in');
+          router.visit('/login');
+          return;
+        }
+        setRoleUser('HRD', meUser);
+        setIsAuthed(true);
+        loadData();
+      } catch {
+        removeToken('HRD');
+        sessionStorage.removeItem('lpk_hrd_logged_in');
+        router.visit('/login');
+      }
+    })();
   }, [router, loadData]);
 
   const handleLogout = () => {
+    // Logout HANYA peran HRD — peran lain di tab sebelah tetap login.
+    authApi.logout().catch(() => null);
+    removeToken('HRD');
     sessionStorage.removeItem('lpk_hrd_logged_in');
     router.visit('/login');
   };

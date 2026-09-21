@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { router, Link } from '@inertiajs/react';
 import Navbar from '@/Components/Navbar';
 import { authApi } from '@/lib/api';
-import { setToken } from '@/lib/axios';
+import { setToken, setRoleUser } from '@/lib/axios';
 
 export default function PesertaLoginPage() {
   const [usernameOrNo, setUsernameOrNo] = useState('');
@@ -34,10 +34,12 @@ export default function PesertaLoginPage() {
           setToken(token, 'PESERTA');
         }
         if (user) {
-          localStorage.setItem('user', JSON.stringify(user));
+          setRoleUser('PESERTA', user);
+          const pendaftar = (user as any).pendaftar;
           sessionStorage.setItem('lpk_peserta_session', JSON.stringify({
-            id: user.id || 'p-1',
-            no_pendaftaran: user.no_pendaftaran || usernameOrNo,
+            pendaftar_id: pendaftar?.id || (user as any).pendaftar_id || null,
+            user_id: user.id,
+            no_pendaftaran: pendaftar?.no_pendaftaran || (user as any).no_pendaftaran || usernameOrNo,
           }));
         }
         router.visit('/peserta/dashboard');

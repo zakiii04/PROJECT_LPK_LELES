@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { router } from '@inertiajs/react';
 import Navbar from '@/Components/Navbar';
 import { authApi } from '@/lib/api';
-import { setToken } from '@/lib/axios';
+import { setToken, setRoleUser } from '@/lib/axios';
 
 export default function AdminLoginPage() {
   const [username, setUsername] = useState('');
@@ -42,7 +42,7 @@ export default function AdminLoginPage() {
           setToken(token, 'ADMIN');
         }
         if (user) {
-          localStorage.setItem('user', JSON.stringify(user));
+          setRoleUser('ADMIN', user);
         }
         sessionStorage.setItem('lpk_admin_logged_in', 'true');
         router.visit('/admin/dashboard');

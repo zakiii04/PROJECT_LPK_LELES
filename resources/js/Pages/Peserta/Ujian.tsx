@@ -67,7 +67,9 @@ export default function PesertaUjianPage({ initialPendaftar }: PesertaUjianPageP
 
     const initExamPage = async () => {
       try {
-        // 1. Resolve participant data
+        // 1. Resolve participant data — HANYA milik sesi login ini.
+        // Urutan: prop Inertia (cookie session) -> /pendaftar/me (token) ->
+        // pendaftar_id yang tersimpan saat login. TANPA fallback ke peserta lain.
         let me: Pendaftar | null = initialPendaftar || pendaftar;
 
         if (!me) {
@@ -77,22 +79,25 @@ export default function PesertaUjianPage({ initialPendaftar }: PesertaUjianPageP
               me = resMe.data;
             }
           } catch (e) {
-            console.warn('pendaftarApi.me() failed, checking local storage:', e);
+            console.warn('pendaftarApi.me() failed:', e);
           }
         }
 
-        // Fallback to local session storage if still null
+        // Fallback ke session storage — hanya bila menyimpan pendaftar_id valid
         if (!me && typeof window !== 'undefined') {
-          const sessRaw = sessionStorage.getItem('lpk_peserta_session') || localStorage.getItem('user');
+          const sessRaw = sessionStorage.getItem('lpk_peserta_session');
           if (sessRaw) {
             try {
               const parsed = JSON.parse(sessRaw);
-              if (parsed && (parsed.id || parsed.no_pendaftaran)) {
-                if (parsed.id) {
-                  const resShow = await pendaftarApi.show(parsed.id).catch(() => null);
-                  if (resShow?.success && resShow.data) {
-                    me = resShow.data;
-                  }
+              // Format baru: { pendaftar_id, user_id, ... }. Format lama hanya
+              // { id: userId } — id user BUKAN id pendaftar, jadi jangan dipakai
+              // untuk pendaftarApi.show() (bisa membuka akun orang lain).
+              const pendaftarId: string | undefined =
+                parsed?.pendaftar_id || parsed?.pendaftarId;
+              if (pendaftarId) {
+                const resShow = await pendaftarApi.show(pendaftarId).catch(() => null);
+                if (resShow?.success && resShow.data) {
+                  me = resShow.data;
                 }
               }
             } catch (err) {
@@ -101,19 +106,8 @@ export default function PesertaUjianPage({ initialPendaftar }: PesertaUjianPageP
           }
         }
 
-        // If after all fallbacks still no participant found, query latest registered
-        if (!me) {
-          try {
-            const resList = await pendaftarApi.list({ per_page: 1 });
-            const listData = resList.data?.data || (Array.isArray(resList.data) ? resList.data : []);
-            if (listData.length > 0) {
-              me = listData[0];
-            }
-          } catch (e) {
-            console.warn('Failed fallback pendaftarApi.list:', e);
-          }
-        }
-
+        // DILARANG fallback ke pendaftarApi.list(per_page:1) / latest():
+        // itu yang menyebabkan peserta A masuk ke akun peserta B.
         if (!me) {
           setErrorMessage('Data peserta Anda tidak ditemukan. Silakan login kembali.');
           setStep('error');

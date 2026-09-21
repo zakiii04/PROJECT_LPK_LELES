@@ -34,8 +34,9 @@ import {
   programApi,
   angkatanApi,
   instrukturApi,
+  authApi,
 } from '@/lib/api';
-import { getToken } from '@/lib/axios';
+import { getToken, removeToken, setRoleUser } from '@/lib/axios';
 import type { Pembayaran, Instruktur } from '@/lib/types';
 import { groupJadwalToKelas } from '@/lib/kelas';
 
@@ -44,6 +45,7 @@ type AdminTab =
   | 'validasi_peserta'
   | 'verifikasi_peserta'
   | 'semua_peserta'
+  | 'histori_pembayaran'
   | 'validasi_pembayaran'
   | 'kelola_program'
   | 'kelola_tempat'
@@ -82,7 +84,9 @@ import ManualRegisterModal from '@/Components/ManualRegisterModal';
 import DeleteConfirmModal from '@/Components/DeleteConfirmModal';
 import AdminPendaftarDetail, { type DetailMode } from '@/Components/AdminPendaftarDetail';
 import PaymentDetailModal from '@/Components/PaymentDetailModal';
-import ActionToast, { useActionToast } from '@/Components/ActionToast';
+import ManualPaymentModal from '@/Components/ManualPaymentModal';
+import HistoriPembayaran from '@/Components/HistoriPembayaran';
+import { RiwayatUjianPanel } from '@/Components/RiwayatUjian';import ActionToast, { useActionToast } from '@/Components/ActionToast';
 
 interface AdminDashboardProps {
   initialPendaftarList?: Pendaftar[];
@@ -110,6 +114,7 @@ export default function AdminDashboardPage(props: AdminDashboardProps) {
   };
   const closeDetail = () => setSelectedPendaftar(null);
   const [selectedPaymentDetail, setSelectedPaymentDetail] = useState<{ pendaftar: Pendaftar; pembayaran: Pembayaran } | null>(null);
+  const [showManualPayment, setShowManualPayment] = useState(false);
   const [isAuthed, setIsAuthed] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string; type: 'pendaftar' | 'jadwal' | 'soal' } | null>(null);
   const { actionToast, showLoading, showSuccess, showError, hideToast } = useActionToast();
@@ -206,6 +211,10 @@ export default function AdminDashboardPage(props: AdminDashboardProps) {
 
   const [filterSoalTipe, setFilterSoalTipe] = useState<'semua' | 'pretest' | 'posttest'>('semua');
   const [filterSoalStatus, setFilterSoalStatus] = useState<'semua' | 'aktif' | 'nonaktif'>('semua');
+
+  // Histori pengerjaan ujian per peserta (croschek jawaban)
+  const [historiPesertaId, setHistoriPesertaId] = useState('');
+  const [historiSearch, setHistoriSearch] = useState('');
 
   // Pagination state
   const [validasiPage, setValidasiPage] = useState(1);
@@ -411,6 +420,32 @@ export default function AdminDashboardPage(props: AdminDashboardProps) {
 
   useEffect(() => {
     setIsMounted(true);
+
+    // Identitas admin WAJIB dari token per-peran — cookie session dipakai
+    // bersama antar-tab sehingga tidak bisa dipercaya di sini.
+    (async () => {
+      if (!getToken('ADMIN')) {
+        router.visit('/login');
+        return;
+      }
+      try {
+        const meRes = await authApi.me();
+        const meUser = (meRes as any)?.data;
+        if (!meRes.success || !meUser || (meUser.role || '').toUpperCase() !== 'ADMIN') {
+          removeToken('ADMIN');
+          sessionStorage.removeItem('lpk_admin_logged_in');
+          router.visit('/login');
+          return;
+        }
+        setRoleUser('ADMIN', meUser);
+      } catch {
+        removeToken('ADMIN');
+        sessionStorage.removeItem('lpk_admin_logged_in');
+        router.visit('/login');
+        return;
+      }
+    })();
+
     setIsAuthed(true);
 
     if (props.initialPendaftarList && props.initialPendaftarList.length > 0) {
@@ -444,6 +479,9 @@ export default function AdminDashboardPage(props: AdminDashboardProps) {
   };
 
   const handleLogout = () => {
+    // Logout HANYA peran admin — peran lain di tab sebelah tetap login.
+    authApi.logout().catch(() => null);
+    removeToken('ADMIN');
     sessionStorage.removeItem('lpk_admin_logged_in');
     router.visit('/admin');
   };
@@ -676,6 +714,18 @@ export default function AdminDashboardPage(props: AdminDashboardProps) {
         />
       )}
 
+      {showManualPayment && (
+        <ManualPaymentModal
+          pendaftarList={pendaftarList}
+          onClose={() => setShowManualPayment(false)}
+          onSuccess={() => {
+            setShowManualPayment(false);
+            showSuccess('add', 'Pembayaran Manual Tercatat!', 'Sisa tagihan peserta otomatis berkurang.');
+            loadData();
+          }}
+        />
+      )}
+
       <aside className={`admin-sidebar w-full lg:w-72 bg-white border-r border-slate-200 flex flex-col justify-between p-4 shadow-sm overflow-y-auto ${sidebarOpen ? 'is-open' : ''}`}>
         <div className="space-y-4">
           {/* Brand Header inside Sidebar */}
@@ -762,6 +812,11 @@ export default function AdminDashboardPage(props: AdminDashboardProps) {
                   badge: stats.total,
                   badgeColor: 'bg-slate-200 text-slate-700',
                 },
+              ] as SidebarItem[],
+            },
+            {
+              sectionTitle: 'PEMBAYARAN',
+              items: [
                 {
                   id: 'validasi_pembayaran' as AdminTab,
                   label: 'Validasi Pembayaran',
@@ -773,6 +828,17 @@ export default function AdminDashboardPage(props: AdminDashboardProps) {
                   ),
                   badge: stats.menungguBayar > 0 ? stats.menungguBayar : null,
                   badgeColor: 'bg-indigo-600 text-white',
+                },
+                {
+                  id: 'histori_pembayaran' as AdminTab,
+                  label: 'Histori Pembayaran',
+                  icon: (
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="12" cy="12" r="10" />
+                      <polyline points="12 6 12 12 16 14" />
+                    </svg>
+                  ),
+                  badge: null as number | null,
                 },
                 {
                   id: 'kelola_metode_pembayaran' as AdminTab,
@@ -1615,6 +1681,17 @@ export default function AdminDashboardPage(props: AdminDashboardProps) {
                   <p className="text-xs text-[var(--text-secondary)]">Daftar bukti pembayaran yang dikirim peserta untuk diperiksa (terima, tolak, atau lunaskan)</p>
                 </div>
                 <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setShowManualPayment(true)}
+                    className="btn btn-primary btn-sm text-xs font-bold flex items-center gap-1.5 whitespace-nowrap"
+                    title="Catat pembayaran yang diterima langsung (cash/transfer offline)"
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <line x1="12" y1="5" x2="12" y2="19" />
+                      <line x1="5" y1="12" x2="19" y2="12" />
+                    </svg>
+                    Catat Manual
+                  </button>
                   <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl">
                     {(
                       [
@@ -1894,6 +1971,11 @@ export default function AdminDashboardPage(props: AdminDashboardProps) {
             </div>
           )}
 
+          {/* TAB HISTORI PEMBAYARAN */}
+          {activeTab === 'histori_pembayaran' && (
+            <HistoriPembayaran />
+          )}
+
           {/* TAB 7: KELOLA PRETEST & POSTTEST */}
           {activeTab === 'kelola_ujian' && (
             <div className="glass-card-static p-6 animate-fade-in space-y-6">
@@ -1912,6 +1994,67 @@ export default function AdminDashboardPage(props: AdminDashboardProps) {
                   </svg>
                   Tambah Soal Ujian Baru
                 </button>
+              </div>
+
+              {/* Histori Pengerjaan Peserta — croschek jawaban pretest/posttest */}
+              <div className="p-5 rounded-xl bg-indigo-50/50 border border-indigo-100 space-y-4">
+                <div>
+                  <h3 className="text-sm font-bold text-indigo-950">Histori Pengerjaan Peserta (Croschek Jawaban)</h3>
+                  <p className="text-xs text-indigo-800/70 mt-0.5">
+                    Pilih peserta untuk melihat seluruh percobaan pretest/posttest beserta rincian jawaban per soal
+                    (jawaban peserta vs kunci) — untuk verifikasi ulang kesesuaian nilai.
+                  </p>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <input
+                    type="text"
+                    value={historiSearch}
+                    onChange={(e) => setHistoriSearch(e.target.value)}
+                    placeholder="Cari nama / no. pendaftaran..."
+                    className="form-input text-xs bg-white"
+                  />
+                  <select
+                    value={historiPesertaId}
+                    onChange={(e) => setHistoriPesertaId(e.target.value)}
+                    className="form-input text-xs font-semibold bg-white"
+                  >
+                    <option value="">— Pilih peserta —</option>
+                    {pendaftarList
+                      .filter((p) => {
+                        if (!historiSearch.trim()) return true;
+                        const q = historiSearch.trim().toLowerCase();
+                        return (
+                          p.nama_lengkap.toLowerCase().includes(q) ||
+                          (p.no_pendaftaran || '').toLowerCase().includes(q)
+                        );
+                      })
+                      .slice(0, 100)
+                      .map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.nama_lengkap} • {p.no_pendaftaran}
+                        </option>
+                      ))}
+                  </select>
+                </div>
+                {historiPesertaId ? (
+                  (() => {
+                    const hp = pendaftarList.find((p) => p.id === historiPesertaId);
+                    return (
+                      <div className="rounded-xl bg-white border border-indigo-100 p-4">
+                        <RiwayatUjianPanel
+                          key={historiPesertaId}
+                          pendaftarId={historiPesertaId}
+                          pendaftarNama={hp ? `${hp.nama_lengkap} (${hp.no_pendaftaran})` : undefined}
+                        />
+                      </div>
+                    );
+                  })()
+                ) : (
+                  <p className="text-[11px] text-indigo-800/60 italic">
+                    Belum ada peserta dipilih. Percobaan lama (sebelum fitur ini aktif) hanya menampilkan nilai
+                    agregat tanpa rincian per soal.
+                  </p>
+                )}
               </div>
 
               {/* Filter Tipe + Status Soal */}

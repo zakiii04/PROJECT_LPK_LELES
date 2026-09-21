@@ -440,12 +440,42 @@ class PendaftarController extends Controller
         }
     }
 
+    /**
+     * Alokasi / lepas peserta dari angkatan.
+     * - angkatan_id diisi: pindahkan ke angkatan tsb (perilaku lama).
+     * - angkatan_id null/kosong: LEPAS dari angkatan (kembali "belum masuk
+     *   angkatan") + lepas seluruh pivot sesi. Dipakai admin untuk
+     *   mengeluarkan peserta dari kelas secara tuntas — peserta hilang dari
+     *   daftar instruktur namun riwayat nilai/ujian/pembayaran tetap utuh
+     *   dan bisa dialokasikan ulang kapan saja.
+     */
     public function alokasiAngkatan(Request $request, string $id)
     {
-        $request->validate(['angkatan_id' => 'required|exists:angkatans,id']);
+        $request->validate(['angkatan_id' => 'nullable|exists:angkatans,id']);
         $pendaftar = Pendaftar::findOrFail($id);
         $oldAngkatanId = $pendaftar->angkatan_id;
-        $pendaftar->update(['angkatan_id' => $request->angkatan_id]);
+        $newAngkatanId = $request->input('angkatan_id') ?: null;
+
+        // Angkatan yang sudah Selesai terkunci — tidak bisa tambah/pindah/lepas.
+        if ($newAngkatanId !== null) {
+            $target = \App\Models\Angkatan::find($newAngkatanId);
+            if ($target && $target->status === 'Selesai') {
+                return response()->json(['success' => false, 'message' => 'Angkatan sudah Selesai — plotting dikunci.'], 422);
+            }
+        } elseif ($oldAngkatanId) {
+            $current = \App\Models\Angkatan::find($oldAngkatanId);
+            if ($current && $current->status === 'Selesai') {
+                return response()->json(['success' => false, 'message' => 'Angkatan sudah Selesai — keanggotaan dikunci.'], 422);
+            }
+        }
+
+        $pendaftar->update(['angkatan_id' => $newAngkatanId]);
+
+        // Lepas dari angkatan: cabut seluruh keterikatan sesi paket.
+        if ($newAngkatanId === null) {
+            $pendaftar->jadwal()->detach();
+            return response()->json(['success' => true, 'message' => 'Peserta dilepas dari angkatan.', 'data' => $pendaftar->load('angkatan')]);
+        }
 
         // Jika angkatan berubah, bersihkan jadwal dari angkatan lama
         if ($oldAngkatanId !== $request->angkatan_id) {

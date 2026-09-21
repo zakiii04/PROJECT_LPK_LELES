@@ -1,15 +1,17 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { router } from '@inertiajs/react';
 import CalendarView from '@/Components/CalendarView';
 import JadwalTable from '@/Components/JadwalTable';
 import PenilaianPanel from '@/Components/PenilaianPanel';
+import { RiwayatUjianPanel } from '@/Components/RiwayatUjian';
 import { type JadwalPelatihan, type Pendaftar } from '@/lib/storage';
 import { angkatanApi, authApi, instrukturApi, jadwalApi, pendaftarApi, programsApi, soalApi } from '@/lib/api';
+import { getToken, removeToken, setRoleUser } from '@/lib/axios';
 import type { Angkatan, Instruktur, ProgramPelatihan, SoalUjian } from '@/lib/types';
 
-type InstrukturTab = 'jadwal' | 'peserta' | 'penilaian' | 'profil' | 'materi' | 'soal_ujian';
+type InstrukturTab = 'jadwal' | 'peserta' | 'penilaian' | 'histori_ujian' | 'profil' | 'materi' | 'soal_ujian';
 
 export interface KelasBinaan {
   key: string;
@@ -27,6 +29,8 @@ export default function InstrukturDashboardPage() {
   const [isAuthed, setIsAuthed] = useState(false);
   const [activeTab, setActiveTab] = useState<InstrukturTab>('jadwal');
   const [jadwalList, setJadwalList] = useState<JadwalPelatihan[]>([]);
+  // Seluruh jadwal (tanpa filter pengajar) — untuk peta plotting per angkatan.
+  const [allJadwalList, setAllJadwalList] = useState<JadwalPelatihan[]>([]);
   const [pendaftarList, setPendaftarList] = useState<Pendaftar[]>([]);
   const [programList, setProgramList] = useState<ProgramPelatihan[]>([]);
   const [selectedProgramFilter, setSelectedProgramFilter] = useState('Semua');
@@ -78,10 +82,19 @@ export default function InstrukturDashboardPage() {
   const [sIsActive, setSIsActive] = useState(true);
   const [filterSoalStatus, setFilterSoalStatus] = useState<'semua' | 'aktif' | 'nonaktif'>('semua');
 
+  // Histori pengerjaan ujian per peserta binaan (croschek jawaban)
+  const [historiPesertaId, setHistoriPesertaId] = useState('');
+
   // Sidebar state
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const loadData = useCallback(async () => {
+    // Identitas instruktur WAJIB dari token per-peran (/auth/me), bukan dari
+    // cookie session (dipakai bersama antar-tab) atau cache bersama.
+    if (!getToken('INSTRUKTUR')) {
+      router.visit('/login');
+      return;
+    }
     try {
       const [jadwalRes, pendaftarRes, progRes, soalRes, meRes, insRes, angkRes] = await Promise.all([
         jadwalApi.list(),
@@ -93,27 +106,30 @@ export default function InstrukturDashboardPage() {
         angkatanApi.list().catch(() => null),
       ]);
       const allJadwal = jadwalRes.data || [];
+      setAllJadwalList(allJadwal);
 
       // Kenali instruktur yang sedang login lalu tampilkan hanya jadwal miliknya
       // (dicocokkan lewat nama pengajar pada tiap sesi: jadwal 1,3,5,7,9 dst.)
       let mine: Instruktur | null = null;
       const meUser = (meRes as any)?.data || (meRes as any)?.user || null;
-      if (meUser) {
-        if ((meUser as any).instruktur) {
-          mine = (meUser as any).instruktur;
-        }
-        setMyUser({ id: meUser.id, username: meUser.username, email: meUser.email });
+      if (!meUser || (meUser.role || '').toUpperCase() !== 'INSTRUKTUR') {
+        // Token hilang/kedaluwarsa ATAU milik peran lain → bukan sesi
+        // instruktur yang valid. Jangan tampilkan data siapa pun.
+        removeToken('INSTRUKTUR');
+        sessionStorage.removeItem('lpk_instruktur_logged_in');
+        router.visit('/login');
+        return;
       }
+      if ((meUser as any).instruktur) {
+        mine = (meUser as any).instruktur;
+      }
+      setMyUser({ id: meUser.id, username: meUser.username, email: meUser.email });
+      setRoleUser('INSTRUKTUR', meUser);
       if (!mine) {
-        try {
-          const localRaw = localStorage.getItem('user');
-          const localUser = localRaw ? JSON.parse(localRaw) : null;
-          const list: Instruktur[] = (insRes as any)?.data || [];
-          if (localUser?.id) {
-            mine = list.find((i) => i.user_id === localUser.id) || null;
-            if (!meUser) setMyUser({ id: localUser.id, username: localUser.username || '', email: localUser.email || '' });
-          }
-        } catch { /* abaikan, tampilkan semua jadwal */ }
+        // Fallback terakhir: cocokkan user_id pada daftar instruktur
+        // (BUKAN dari cache bersama — hanya dari /auth/me di atas).
+        const list: Instruktur[] = (insRes as any)?.data || [];
+        mine = list.find((i) => i.user_id === meUser.id) || null;
       }
 
       if (mine) {
@@ -153,7 +169,40 @@ export default function InstrukturDashboardPage() {
     loadData();
   }, [router, loadData]);
 
+  // Auto-refresh agar perubahan admin di tab lain (tambah/keluarkan peserta,
+  // ubah jadwal/soal) otomatis tercermin tanpa refresh manual.
+  const loadDataRef = useRef(loadData);
+  loadDataRef.current = loadData;
+  useEffect(() => {
+    const refreshIfVisible = () => {
+      if (document.visibilityState === 'visible') loadDataRef.current();
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') loadDataRef.current();
+    };
+    window.addEventListener('focus', refreshIfVisible);
+    document.addEventListener('visibilitychange', onVisibility);
+    const interval = window.setInterval(refreshIfVisible, 60000);
+    return () => {
+      window.removeEventListener('focus', refreshIfVisible);
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.clearInterval(interval);
+    };
+  }, []);
+
+  // Refetch tiap kali masuk tab berisi data peserta (peserta/penilaian/histori).
+  useEffect(() => {
+    if (activeTab === 'peserta' || activeTab === 'penilaian' || activeTab === 'histori_ujian') {
+      loadData();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
+
   const handleLogout = () => {
+    // Logout HANYA peran instruktur: revoke token sendiri di server, hapus
+    // key peran sendiri. Peran lain di tab sebelah tetap login.
+    authApi.logout().catch(() => null);
+    removeToken('INSTRUKTUR');
     sessionStorage.removeItem('lpk_instruktur_logged_in');
     router.visit('/login');
   };
@@ -304,6 +353,25 @@ export default function InstrukturDashboardPage() {
 
   const selectedKelas = myKelasList.find((k) => k.key === selectedKelasKey) || myKelasList[0] || null;
 
+  // Peta plotting SELURUH jadwal per angkatan (milik instruktur mana pun).
+  // Dipakai fallback agar tidak menampilkan peserta yang sebenarnya sudah
+  // ditempatkan di kelas/sesi lain dalam angkatan yang sama.
+  const angkatanPlotted = useMemo(() => {
+    const map = new Map<string, Set<string>>();
+    for (const j of allJadwalList) {
+      if (!j.angkatan_id) continue;
+      let set = map.get(j.angkatan_id);
+      if (!set) {
+        set = new Set<string>();
+        map.set(j.angkatan_id, set);
+      }
+      for (const p of j.peserta || []) {
+        set.add(typeof p === 'string' ? p : p.id);
+      }
+    }
+    return map;
+  }, [allJadwalList]);
+
   // ── Peserta yang diajar: pivot jadwal milik instruktur dulu, fallback angkatan+tempat ──
   const pesertaBinaan: Pendaftar[] = useMemo(() => {
     if (!jadwalFiltered) {
@@ -314,7 +382,6 @@ export default function InstrukturDashboardPage() {
     const pivotIds = new Set<string>();
     for (const k of myKelasList) for (const pid of k.pesertaIds) pivotIds.add(pid);
 
-    const inPivot = (p: Pendaftar) => pivotIds.has(p.id);
     const inAngkatanTempat = (p: Pendaftar, kelas: KelasBinaan) => {
       if (p.angkatan_id !== kelas.angkatanId) return false;
       const pv = (p.tempat_pelatihan || '').trim();
@@ -326,14 +393,25 @@ export default function InstrukturDashboardPage() {
     if (pivotIds.size > 0) {
       const allowed = new Set<string>();
       for (const k of scope) for (const pid of k.pesertaIds) allowed.add(pid);
-      // bila kelas terpilih belum punya peserta di pivot, fallback ke angkatan+tempat
       if (allowed.size === 0) {
-        return pendaftarList.filter((p) => scope.some((k) => inAngkatanTempat(p, k)));
+        // Kelas terpilih pivot-nya kosong padahal plotting sudah dipakai
+        // (kelas lain punya pivot): artinya seluruh peserta kelas ini memang
+        // dikeluarkan — tampilkan kosong, JANGAN fallback ke angkatan+tempat
+        // yang akan memunculkan lagi peserta yang baru dikeluarkan.
+        return [];
       }
-      return pendaftarList.filter((p) => allowed.has(p.id) && inPivot(p));
+      return pendaftarList.filter((p) => allowed.has(p.id));
     }
-    return pendaftarList.filter((p) => scope.some((k) => inAngkatanTempat(p, k)));
-  }, [pendaftarList, myKelasList, selectedKelas, selectedKelasKey, jadwalFiltered, selectedProgramFilter]);
+    // Belum ada plotting sama sekali di kelas sendiri → fallback ke anggota
+    // angkatan+tempat, TAPI kecualikan peserta yang sudah di-plot di sesi
+    // mana pun dalam angkatan yang sama (milik instruktur lain) — mereka
+    // sudah bertuan di kelas lain, bukan kandidat kelas ini.
+    return pendaftarList.filter(
+      (p) =>
+        scope.some((k) => inAngkatanTempat(p, k)) &&
+        !(p.angkatan_id && angkatanPlotted.get(p.angkatan_id)?.has(p.id)),
+    );
+  }, [pendaftarList, myKelasList, selectedKelas, selectedKelasKey, jadwalFiltered, selectedProgramFilter, angkatanPlotted, allJadwalList]);
 
   const filteredPendaftar = pesertaBinaan;
 
@@ -394,6 +472,20 @@ export default function InstrukturDashboardPage() {
           ),
           badge: null,
           badgeColor: 'bg-slate-200 text-slate-700',
+        },
+        {
+          id: 'histori_ujian' as InstrukturTab,
+          label: 'Histori Ujian',
+          icon: (
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+              <polyline points="14 2 14 8 20 8" />
+              <line x1="16" y1="13" x2="8" y2="13" />
+              <line x1="16" y1="17" x2="8" y2="17" />
+            </svg>
+          ),
+          badge: null,
+          badgeColor: 'bg-amber-100 text-amber-700',
         },
       ],
     },
@@ -753,6 +845,55 @@ export default function InstrukturDashboardPage() {
                     title={`Penilaian — ${selectedKelas.angkatanNama}`}
                     subtitle={`${selectedKelas.programNama} • ${selectedKelas.tempat}. Nilai Ujian Akhir (Posttest) terisi otomatis dari hasil ujian online peserta.`}
                   />
+                )}
+              </div>
+            )}
+
+            {/* TAB 4: HISTORI UJIAN PESERTA BINAAN (CROSCHEK JAWABAN) */}
+            {activeTab === 'histori_ujian' && (
+              <div className="space-y-4 animate-fade-in">
+                <div className="pb-3 border-b border-slate-100">
+                  <h3 className="font-bold text-slate-800 text-base">Histori Pengerjaan Pretest & Posttest</h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Pilih peserta binaan untuk melihat seluruh percobaan ujian beserta rincian jawaban per soal
+                    (jawaban peserta vs kunci) — untuk croschek ulang kesesuaian nilai.
+                  </p>
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Peserta Binaan:</label>
+                  <select
+                    value={historiPesertaId}
+                    onChange={(e) => setHistoriPesertaId(e.target.value)}
+                    className="form-input text-xs w-full sm:w-auto sm:min-w-80"
+                  >
+                    <option value="">— Pilih peserta —</option>
+                    {filteredPendaftar.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.nama_lengkap} • {p.no_pendaftaran}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {!historiPesertaId ? (
+                  <div className="text-center py-12 text-slate-400 text-xs border border-dashed rounded-xl bg-white">
+                    Pilih peserta binaan untuk menampilkan histori pengerjaannya.
+                  </div>
+                ) : (
+                  (() => {
+                    const hp = filteredPendaftar.find((p) => p.id === historiPesertaId)
+                      || pendaftarList.find((p) => p.id === historiPesertaId);
+                    return (
+                      <div className="rounded-xl bg-white border border-slate-200 p-4">
+                        <RiwayatUjianPanel
+                          key={historiPesertaId}
+                          pendaftarId={historiPesertaId}
+                          pendaftarNama={hp ? `${hp.nama_lengkap} (${hp.no_pendaftaran})` : undefined}
+                        />
+                      </div>
+                    );
+                  })()
                 )}
               </div>
             )}

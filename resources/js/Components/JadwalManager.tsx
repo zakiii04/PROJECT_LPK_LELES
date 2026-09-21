@@ -752,6 +752,10 @@ export default function JadwalManager({
   // Handler: Tarik Peserta Massal ke Paket Jadwal (Hari 1 - 10)
   const handleBulkPullParticipants = async (ang: Angkatan) => {
     const angSchedules = getSchedulesForPackage(ang.id, selectedTempatForDetail);
+    if (ang?.status === 'Selesai') {
+      showError('Angkatan Selesai', 'Plotting dikunci — angkatan ini sudah diselesaikan.');
+      return;
+    }
     if (angSchedules.length === 0) {
       alert('Belum ada sesi harian. Silakan buat sesi harian terlebih dahulu.');
       return;
@@ -784,6 +788,10 @@ export default function JadwalManager({
 
   // Handler: Tarik / Keluarkan Peserta Satu Per Satu (Granular)
   const handleToggleSingleParticipant = async (ang: Angkatan, pendaftarId: string, isCurrentlyAdded: boolean) => {
+    if (ang?.status === 'Selesai') {
+      showError('Angkatan Selesai', 'Plotting dikunci — angkatan ini sudah diselesaikan.');
+      return;
+    }
     const angSchedules = getSchedulesForPackage(ang.id, selectedTempatForDetail);
     if (angSchedules.length === 0) {
       alert('Belum ada sesi harian. Silakan buat/generate sesi harian terlebih dahulu.');
@@ -1151,6 +1159,9 @@ export default function JadwalManager({
                   </p>
                 </div>
 
+                {ang?.status === 'Selesai' ? (
+                  <span className="text-[11px] italic text-slate-400 shrink-0">Angkatan selesai — plotting dikunci.</span>
+                ) : (
                 <button
                   onClick={() => setShowPullModal(true)}
                   className="btn btn-primary btn-sm font-bold shrink-0 text-xs flex items-center gap-1.5"
@@ -1161,6 +1172,7 @@ export default function JadwalManager({
                   </svg>
                   <span> Tarik / Pilih Peserta Angkatan</span>
                 </button>
+                )}
               </div>
 
               {/* TABEL Peserta yang Sudah Ditarik */}
@@ -1212,6 +1224,7 @@ export default function JadwalManager({
                               >
                                 Detail
                               </button>
+                              {ang?.status !== 'Selesai' && (
                               <button
                                 type="button"
                                 onClick={() => handleToggleSingleParticipant(ang, p.id, true)}
@@ -1220,6 +1233,7 @@ export default function JadwalManager({
                               >
                                 Keluarkan
                               </button>
+                              )}
                             </div>
                           </td>
                         </tr>
@@ -1887,7 +1901,7 @@ export default function JadwalManager({
               </div>
 
               {/* Action Button: Tarik Semua */}
-              {angkatanCandidates.length > 0 && (
+              {angkatanCandidates.length > 0 && ang?.status !== 'Selesai' && (
                 <div className="flex justify-end">
                   <button
                     onClick={() => handleBulkPullParticipants(ang)}
@@ -1897,6 +1911,9 @@ export default function JadwalManager({
                     {isGenerating ? 'Memproses...' : `Tarik Semua Peserta Angkatan (${angkatanCandidates.length} Orang)`}
                   </button>
                 </div>
+              )}
+              {ang?.status === 'Selesai' && (
+                <p className="text-[11px] italic text-slate-400 text-right">Angkatan selesai — plotting dikunci.</p>
               )}
 
               {/* Candidates List inside Pop-up */}
@@ -1944,6 +1961,7 @@ export default function JadwalManager({
                               <span className="px-2 py-0.5 rounded-lg bg-emerald-100 text-emerald-800 font-bold text-[10px] border border-emerald-200">
                                 Terdaftar Di Jadwal
                               </span>
+                              {ang?.status !== 'Selesai' && (
                               <button
                                 type="button"
                                 onClick={() => handleToggleSingleParticipant(ang, p.id, true)}
@@ -1952,8 +1970,10 @@ export default function JadwalManager({
                               >
                                 Keluarkan
                               </button>
+                              )}
                             </div>
                           ) : (
+                            ang?.status !== 'Selesai' && (
                             <button
                               type="button"
                               onClick={() => handleToggleSingleParticipant(ang, p.id, false)}
@@ -1962,6 +1982,7 @@ export default function JadwalManager({
                             >
                               + Tarik Peserta Ini
                             </button>
+                            )
                           )}
                         </div>
                       </div>

@@ -5,8 +5,9 @@ import type {
   User, CreateUserPayload,
   ProgramPelatihan, CreateProgramPayload, UpdateProgramPayload,
   Angkatan, CreateAngkatanPayload, UpdateAngkatanPayload, AngkatanStatus,
+  PenyelesaianKelas, CreatePenyelesaianPayload,
   Pendaftar, CreatePendaftarPayload, PendaftarStatus,
-  PembayaranInfo, Pembayaran,
+  PembayaranInfo, Pembayaran, Tagihan,
   Interview, CreateInterviewPayload,
   JadwalPelatihan, CreateJadwalPayload,
   Kehadiran, CreateKehadiranPayload, BulkKehadiranPayload, KehadiranRekap,
@@ -104,6 +105,32 @@ export const angkatanApi = {
     request<Pendaftar[]>(apiClient.get(`/angkatan/${angkatanId}/pendaftar`)),
 };
 
+// ── Penyelesaian Kelas (angkatan + tempat) ──────────────
+export const penyelesaianApi = {
+  list: (params?: { angkatan_id?: string }) =>
+    request<PenyelesaianKelas[]>(apiClient.get('/penyelesaian-kelas', { params })),
+  // Custom (tidak pakai request<> generik) agar flag top-level
+  // `angkatan_selesai` dari backend tidak hilang.
+  selesaikan: async (
+    p: CreatePenyelesaianPayload,
+  ): Promise<ApiResponse<PenyelesaianKelas & { angkatan_selesai?: boolean }>> => {
+    try {
+      const res = await apiClient.post('/penyelesaian-kelas', p);
+      const b = res.data;
+      return {
+        success: b?.success ?? true,
+        message: b?.message,
+        data: { ...(b?.data || {}), angkatan_selesai: b?.angkatan_selesai },
+      };
+    } catch (err: any) {
+      return {
+        success: false,
+        error: err.response?.data?.message || err.message || 'Gagal menghubungi server.',
+      };
+    }
+  },
+};
+
 // ── Tempat Pelatihan ──────────────────────────────────
 export const tempatApi = {
   list: () =>
@@ -187,7 +214,7 @@ export const pendaftarApi = {
     }
   ) =>
     request<Pendaftar>(apiClient.patch(`/pendaftar/${id}/verifikasi`, { status, ...data })),
-  alokasiAngkatan: (id: string, angkatan_id: string) =>
+  alokasiAngkatan: (id: string, angkatan_id: string | null) =>
     request<Pendaftar>(apiClient.patch(`/pendaftar/${id}/angkatan`, { angkatan_id })),
   destroy: (id: string) =>
     request<null>(apiClient.delete(`/pendaftar/${id}`)),
@@ -224,6 +251,13 @@ export const pembayaranApi = {
         headers: { 'Content-Type': 'multipart/form-data' },
       }),
     ),
+  // Pembayaran manual oleh admin: langsung diterima + kurangi sisa tagihan.
+  catatManual: (pendaftarId: string, formData: FormData) =>
+    request<Pembayaran>(
+      apiClient.post(`/pendaftar/${pendaftarId}/pembayaran/manual`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      }),
+    ),
   verifikasi: (pendaftarId: string) =>
     request<null>(apiClient.patch(`/pendaftar/${pendaftarId}/pembayaran/verifikasi`)),
   tolak: (pendaftarId: string) =>
@@ -232,6 +266,19 @@ export const pembayaranApi = {
     request<Pembayaran>(apiClient.patch(`/pembayaran/${pembayaranId}/verifikasi`, { lunaskan })),
   tolakTransaksi: (pembayaranId: string, catatan?: string) =>
     request<Pembayaran>(apiClient.patch(`/pembayaran/${pembayaranId}/tolak`, { catatan })),
+  // Riwayat seluruh transaksi (menu Histori Pembayaran admin).
+  riwayat: (params?: {
+    status?: string;
+    tipe_pembayaran?: string;
+    search?: string;
+    tanggal_dari?: string;
+    tanggal_sampai?: string;
+    per_page?: number;
+    page?: number;
+  }) =>
+    request<PaginatedData<Pembayaran & { tagihan?: Tagihan & { pendaftar?: Pendaftar }; paymentMethod?: PaymentMethod }>>(
+      apiClient.get('/pembayaran', { params }),
+    ),
 };
 
 export const paymentMethodApi = {
@@ -363,10 +410,12 @@ export const ujianApi = {
 
 // ── Hasil Ujian ──────────────────────────────────────
 export const hasilUjianApi = {
-  list: () =>
-    request<HasilUjian[]>(apiClient.get('/hasil-ujian')),
+  list: (params?: { pendaftar_id?: string; tipe?: string }) =>
+    request<HasilUjian[]>(apiClient.get('/hasil-ujian', { params })),
   show: (id: string) =>
     request<HasilUjian>(apiClient.get(`/hasil-ujian/${id}`)),
+  byPendaftar: (pendaftarId: string, params?: { tipe?: string }) =>
+    request<HasilUjian[]>(apiClient.get(`/pendaftar/${pendaftarId}/hasil-ujian`, { params })),
 };
 
 // ── Kelulusan ────────────────────────────────────────

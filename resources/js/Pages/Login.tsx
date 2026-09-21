@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { router, Link } from '@inertiajs/react';
 import Navbar from '@/Components/Navbar';
 import { authApi } from '@/lib/api';
-import { setToken } from '@/lib/axios';
+import { setToken, setRoleUser, type AppRole } from '@/lib/axios';
 
 export default function LoginPage() {
   const [usernameOrEmail, setUsernameOrEmail] = useState('');
@@ -42,11 +42,18 @@ export default function LoginPage() {
         const user = data.user;
 
         if (token) {
-          setToken(token);
+          // Token & user disimpan SCOPE-PER-PERAN agar login peran lain di
+          // tab sebelah tidak menimpa sesi tab ini.
+          const detected = (user?.role || '').toUpperCase();
+          const loginRole = (
+            detected === 'ADMIN' || detected === 'HRD' || detected === 'INSTRUKTUR'
+              ? detected
+              : 'PESERTA'
+          ) as AppRole;
+          setToken(token, loginRole);
+          setRoleUser(loginRole, user);
         }
         if (user) {
-          localStorage.setItem('user', JSON.stringify(user));
-
           // Deteksi role secara otomatis di bagian belakang (behind-the-scenes)
           const role = (user.role || '').toUpperCase();
 
@@ -63,10 +70,13 @@ export default function LoginPage() {
             router.visit('/instruktur/dashboard');
             return;
           } else {
-            // Default: Peserta
+            // Default: Peserta — simpan pendaftar_id (BUKAN user.id) agar
+            // halaman Ujian/Dashboard tidak salah membuka akun peserta lain.
+            const pendaftar = (user as any).pendaftar;
             sessionStorage.setItem('lpk_peserta_session', JSON.stringify({
-              id: user.id,
-              no_pendaftaran: user.no_pendaftaran || cleanIdentifier,
+              pendaftar_id: pendaftar?.id || (user as any).pendaftar_id || null,
+              user_id: user.id,
+              no_pendaftaran: pendaftar?.no_pendaftaran || (user as any).no_pendaftaran || cleanIdentifier,
             }));
             router.visit('/peserta/dashboard');
             return;

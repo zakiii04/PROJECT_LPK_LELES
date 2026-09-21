@@ -77,8 +77,15 @@ Route::get('/peserta/dashboard', function () {
     if ($user) {
         $pendaftar = Pendaftar::with(['program', 'angkatan', 'user', 'tagihan.pembayarans.paymentMethod'])->where('user_id', $user->id)->first();
     }
+    // JANGAN fallback ke latest()->first(): itu membocorkan akun peserta lain
+    // ke sesi yang tidak terautentikasi. Biarkan null agar frontend redirect ke login.
     if (!$pendaftar) {
-        $pendaftar = Pendaftar::with(['program', 'angkatan', 'user', 'tagihan.pembayarans.paymentMethod'])->latest('tanggal_daftar')->first();
+        return Inertia::render('Peserta/Dashboard', [
+            'initialPendaftar'       => null,
+            'initialJadwalList'      => [],
+            'initialHasilUjianList'  => [],
+            'initialKelulusanRecord' => null,
+        ]);
     }
 
     $jadwalList = [];
@@ -114,9 +121,8 @@ Route::get('/peserta/ujian', function () {
     if ($user) {
         $pendaftar = Pendaftar::with(['program', 'angkatan', 'user'])->where('user_id', $user->id)->first();
     }
-    if (!$pendaftar) {
-        $pendaftar = Pendaftar::with(['program', 'angkatan', 'user'])->latest('tanggal_daftar')->first();
-    }
+    // JANGAN fallback ke latest()->first(): membocorkan akun peserta lain.
+    // Biarkan null agar halaman ujian menampilkan error + redirect ke login.
 
     return Inertia::render('Peserta/Ujian', [
         'initialPendaftar' => $pendaftar,
@@ -164,6 +170,71 @@ Route::put('/angkatan/{id}', [AngkatanController::class, 'update']);
 Route::patch('/angkatan/{id}/status', [AngkatanController::class, 'updateStatus']);
 Route::delete('/angkatan/{id}', [AngkatanController::class, 'destroy']);
 Route::get('/angkatan/{id}/pendaftar', [PendaftarController::class, 'byAngkatan']);
+
+// =========================================================
+// PENYELESAIAN KELAS (angkatan + tempat)
+// Satu baris = satu kelas selesai. Begitu SELURUH kelas (distinct
+// tempat pada sesi jadwal) dalam satu angkatan selesai, status angkatan
+// otomatis menjadi 'Selesai'.
+// =========================================================
+Route::get('/penyelesaian-kelas', function (\Illuminate\Http\Request $request) {
+    $query = \App\Models\PenyelesaianKelas::with('angkatan');
+    if ($request->filled('angkatan_id')) $query->where('angkatan_id', $request->angkatan_id);
+    return response()->json(['success' => true, 'data' => $query->orderBy('created_at')->get()]);
+});
+
+Route::post('/penyelesaian-kelas', function (\Illuminate\Http\Request $request) {
+    $data = $request->validate([
+        'angkatan_id'     => 'required|string|exists:angkatans,id',
+        'tempat_pelatihan' => 'required|string|max:255',
+        'tanggal_selesai' => 'nullable|date',
+    ]);
+
+    $exists = \App\Models\PenyelesaianKelas::where('angkatan_id', $data['angkatan_id'])
+        ->where('tempat_pelatihan', $data['tempat_pelatihan'])
+        ->first();
+    if ($exists) {
+        return response()->json(['success' => false, 'message' => 'Kelas ini sudah diselesaikan sebelumnya.'], 409);
+    }
+
+    $result = \Illuminate\Support\Facades\DB::transaction(function () use ($data) {
+        $penyelesaian = \App\Models\PenyelesaianKelas::create([
+            'id'               => (string) \Illuminate\Support\Str::uuid(),
+            'angkatan_id'      => $data['angkatan_id'],
+            'tempat_pelatihan' => $data['tempat_pelatihan'],
+            'tanggal_selesai'  => $data['tanggal_selesai'] ?? now()->toDateString(),
+        ]);
+
+        // Auto-Selesai angkatan: semua distinct tempat pada sesi jadwal
+        // sudah punya catatan penyelesaian.
+        $semuaTempat = \App\Models\JadwalPelatihan::where('angkatan_id', $data['angkatan_id'])
+            ->whereNotNull('tempat_pelatihan')
+            ->distinct()
+            ->pluck('tempat_pelatihan');
+        $selesaiTempat = \App\Models\PenyelesaianKelas::where('angkatan_id', $data['angkatan_id'])
+            ->pluck('tempat_pelatihan');
+
+        $angkatanSelesai = false;
+        if ($semuaTempat->count() > 0 && $semuaTempat->diff($selesaiTempat)->isEmpty()) {
+            $angkatan = \App\Models\Angkatan::find($data['angkatan_id']);
+            if ($angkatan && $angkatan->status !== 'Selesai') {
+                $angkatan->update(['status' => 'Selesai']);
+                $angkatanSelesai = true;
+            }
+        }
+
+        return ['penyelesaian' => $penyelesaian, 'angkatan_selesai' => $angkatanSelesai];
+    });
+
+    return response()->json([
+        'success'           => true,
+        'message'           => $result['angkatan_selesai']
+            ? 'Kelas diselesaikan. Seluruh kelas selesai — status angkatan otomatis menjadi Selesai.'
+            : 'Kelas diselesaikan.',
+        'data'              => $result['penyelesaian'],
+        'angkatan_selesai'  => $result['angkatan_selesai'],
+    ], 201);
+});
 
 // Tempat Pelatihan
 Route::get('/tempat', [TempatPelatihanController::class, 'index']);
@@ -290,13 +361,10 @@ Route::delete('/instruktur/{id}', function (string $id) {
 // Pendaftar
 Route::get('/pendaftar/me', function (\Illuminate\Http\Request $request) {
     $user = $request->user() ?? auth()->user();
-    $pendaftar = null;
-    if ($user) {
-        $pendaftar = \App\Models\Pendaftar::with(['program', 'angkatan', 'user', 'tagihan.pembayarans.paymentMethod'])->where('user_id', $user->id)->first();
+    if (!$user) {
+        return response()->json(['success' => false, 'message' => 'Unauthenticated. Silakan login kembali.'], 401);
     }
-    if (!$pendaftar) {
-        $pendaftar = \App\Models\Pendaftar::with(['program', 'angkatan', 'user', 'tagihan.pembayarans.paymentMethod'])->latest('tanggal_daftar')->first();
-    }
+    $pendaftar = \App\Models\Pendaftar::with(['program', 'angkatan', 'user', 'tagihan.pembayarans.paymentMethod'])->where('user_id', $user->id)->first();
     if (!$pendaftar) {
         return response()->json(['success' => false, 'message' => 'Peserta tidak ditemukan'], 404);
     }
@@ -329,13 +397,10 @@ Route::get('/pendaftar/me/jadwal', function (\Illuminate\Http\Request $request) 
 
 Route::get('/pendaftar/me/kehadiran', function (\Illuminate\Http\Request $request) {
     $user = $request->user() ?? auth()->user();
-    $pendaftar = null;
-    if ($user) {
-        $pendaftar = \App\Models\Pendaftar::where('user_id', $user->id)->first();
+    if (!$user) {
+        return response()->json(['success' => false, 'message' => 'Unauthenticated.'], 401);
     }
-    if (!$pendaftar) {
-        $pendaftar = \App\Models\Pendaftar::latest('tanggal_daftar')->first();
-    }
+    $pendaftar = \App\Models\Pendaftar::where('user_id', $user->id)->first();
     if (!$pendaftar) return response()->json(['success' => true, 'data' => []]);
 
     $data = \App\Models\Kehadiran::where('pendaftar_id', $pendaftar->id)->get();
@@ -344,13 +409,10 @@ Route::get('/pendaftar/me/kehadiran', function (\Illuminate\Http\Request $reques
 
 Route::get('/pendaftar/me/kelulusan', function (\Illuminate\Http\Request $request) {
     $user = $request->user() ?? auth()->user();
-    $pendaftar = null;
-    if ($user) {
-        $pendaftar = \App\Models\Pendaftar::where('user_id', $user->id)->first();
+    if (!$user) {
+        return response()->json(['success' => false, 'message' => 'Unauthenticated.'], 401);
     }
-    if (!$pendaftar) {
-        $pendaftar = \App\Models\Pendaftar::latest('tanggal_daftar')->first();
-    }
+    $pendaftar = \App\Models\Pendaftar::where('user_id', $user->id)->first();
     if (!$pendaftar) return response()->json(['success' => true, 'data' => null]);
 
     $data = \App\Models\Kelulusan::with('pendaftar.program')->where('pendaftar_id', $pendaftar->id)->first();
@@ -531,22 +593,34 @@ Route::post('/ujian/submit', function (\Illuminate\Http\Request $request) {
         'pendaftar_id' => 'nullable|string',
     ]);
 
-    // 1. Resolve real pendaftar
+    // 1. Resolve real pendaftar — STRICT, tanpa fallback ke peserta lain.
+    // Prioritas: pendaftar milik user yang sedang login (anti lintas-akun).
     $pendaftar = null;
+    $authUser = auth()->user() ?? $request->user();
+    if ($authUser) {
+        $pendaftar = \App\Models\Pendaftar::where('user_id', $authUser->id)->first();
+    }
+    // Jika client mengirim pendaftar_id eksplisit, hanya terima bila milik user ini
+    // (atau bila tidak ada sesi login sama sekali, pakai apa adanya — tapi JANGAN
+    // pernah fallback ke latest()).
     if (!empty($data['pendaftar_id'])) {
-        $pendaftar = \App\Models\Pendaftar::find($data['pendaftar_id']);
-    }
-    if (!$pendaftar && auth()->check()) {
-        $pendaftar = \App\Models\Pendaftar::where('user_id', auth()->id())->first();
-    }
-    if (!$pendaftar) {
-        $pendaftar = \App\Models\Pendaftar::latest('tanggal_daftar')->first();
+        $claimed = \App\Models\Pendaftar::find($data['pendaftar_id']);
+        if ($claimed) {
+            if ($authUser) {
+                if ($claimed->user_id === $authUser->id) {
+                    $pendaftar = $claimed;
+                }
+                // else: abaikan pendaftar_id milik orang lain — tetap pakai milik auth user
+            } else {
+                $pendaftar = $claimed;
+            }
+        }
     }
     if (!$pendaftar) {
         return response()->json([
             'success' => false,
             'message' => 'Data peserta tidak ditemukan. Silakan login kembali.',
-        ], 404);
+        ], 401);
     }
 
     // 2. Enforce maximum 3 attempts per test type
@@ -564,19 +638,32 @@ Route::post('/ujian/submit', function (\Illuminate\Http\Request $request) {
         ], 422);
     }
 
-    // 3. Grade answers
+    // 3. Grade answers (+ snapshot rincian per soal untuk croschek admin/instruktur)
     $soalIds = collect($data['jawaban'])->pluck('soal_id')->toArray();
     $soalList = \App\Models\SoalUjian::whereIn('id', $soalIds)->get()->keyBy('id');
 
     $benar = 0;
     $salah = 0;
+    $detail = [];
     foreach ($data['jawaban'] as $item) {
         $soal = $soalList->get($item['soal_id']);
-        if ($soal && (int)$item['jawaban'] === (int)$soal->jawaban_benar) {
+        $jawabanPeserta = (int) $item['jawaban'];
+        $kunci = $soal ? (int) $soal->jawaban_benar : null;
+        $isBenar = $soal && $jawabanPeserta === $kunci;
+        if ($isBenar) {
             $benar++;
         } else {
             $salah++;
         }
+        $detail[] = [
+            'soal_id'         => $item['soal_id'],
+            'pertanyaan'      => $soal->pertanyaan ?? '(soal dihapus)',
+            'opsi'            => $soal->opsi ?? [],
+            'gambar_soal'     => $soal->gambar_soal ?? null,
+            'jawaban_peserta' => $jawabanPeserta,
+            'jawaban_benar'   => $kunci,
+            'benar'           => $isBenar,
+        ];
     }
     $total = count($data['jawaban']);
     $nilai = $total > 0 ? round(($benar / $total) * 100) : 0;
@@ -589,6 +676,7 @@ Route::post('/ujian/submit', function (\Illuminate\Http\Request $request) {
         'benar'        => $benar,
         'salah'        => $salah,
         'total_soal'   => $total,
+        'detail'       => $detail,
         'pendaftar_id' => $pendaftar->id,
         'tanggal'      => now(),
     ]);
@@ -597,19 +685,26 @@ Route::post('/ujian/submit', function (\Illuminate\Http\Request $request) {
     $prevMaxNilai = $existingAttempts->max('nilai') ?? 0;
     $bestNilai = max($prevMaxNilai, $nilai);
 
-    // Update into Nilai table so certificate and transcripts use highest score
-    \App\Models\Nilai::updateOrCreate(
+    // Update into Nilai table so certificate and transcripts use highest score.
+    // (firstOrNew + isi id manual: updateOrCreate tanpa id gagal insert karena
+    //  kolom id tidak punya default value; isi id hanya untuk baris baru agar
+    //  primary key baris lama tidak tertimpa.)
+    $nilaiRow = \App\Models\Nilai::firstOrNew(
         [
             'pendaftar_id'      => $pendaftar->id,
             'tipe_nilai'        => $data['tipe'],
             'mata_pelajaran_id' => null,
-        ],
-        [
-            'nilai'   => $bestNilai,
-            'tanggal' => now(),
-            'catatan' => 'Ujian ' . ucfirst($data['tipe']) . ' (Nilai Tertinggi dari ' . ($existingAttempts->count() + 1) . 'x percobaan)',
         ]
     );
+    if (!$nilaiRow->exists) {
+        $nilaiRow->id = (string) \Illuminate\Support\Str::uuid();
+    }
+    $nilaiRow->fill([
+        'nilai'   => $bestNilai,
+        'tanggal' => now(),
+        'catatan' => 'Ujian ' . ucfirst($data['tipe']) . ' (Nilai Tertinggi dari ' . ($existingAttempts->count() + 1) . 'x percobaan)',
+    ]);
+    $nilaiRow->save();
 
     return response()->json([
         'success'     => true,
@@ -621,14 +716,11 @@ Route::post('/ujian/submit', function (\Illuminate\Http\Request $request) {
 });
 
 Route::get('/pendaftar/me/ujian', function () {
-    $user = auth()->user();
-    $pendaftar = null;
-    if ($user) {
-        $pendaftar = \App\Models\Pendaftar::where('user_id', $user->id)->first();
+    $user = auth()->user() ?? request()->user();
+    if (!$user) {
+        return response()->json(['success' => false, 'message' => 'Unauthenticated.'], 401);
     }
-    if (!$pendaftar) {
-        $pendaftar = \App\Models\Pendaftar::latest('tanggal_daftar')->first();
-    }
+    $pendaftar = \App\Models\Pendaftar::where('user_id', $user->id)->first();
     if (!$pendaftar) return response()->json(['success' => true, 'data' => []]);
 
     $list = \App\Models\HasilUjian::where('pendaftar_id', $pendaftar->id)
@@ -639,14 +731,70 @@ Route::get('/pendaftar/me/ujian', function () {
     return response()->json(['success' => true, 'data' => $list]);
 });
 
-Route::get('/hasil-ujian', function () {
-    $list = \App\Models\HasilUjian::orderBy('nilai', 'desc')->orderBy('tanggal', 'desc')->get();
+Route::get('/hasil-ujian', function (\Illuminate\Http\Request $request) {
+    $query = \App\Models\HasilUjian::with('pendaftar.program');
+    if ($request->filled('pendaftar_id')) $query->where('pendaftar_id', $request->pendaftar_id);
+    if ($request->filled('tipe')) $query->where('tipe', $request->tipe);
+    $list = $query->orderBy('tanggal', 'desc')->get();
+    return response()->json(['success' => true, 'data' => $list]);
+});
+
+// Detail satu percobaan ujian + snapshot croschek jawaban per soal.
+// Untuk attempt lama yang belum punya snapshot `detail`, susun ulang dari
+// data soal saat ini (ditandai reconstructed=true).
+Route::get('/hasil-ujian/{id}', function (string $id) {
+    $hasil = \App\Models\HasilUjian::with('pendaftar.program')->find($id);
+    if (!$hasil) return response()->json(['success' => false, 'message' => 'Hasil ujian tidak ditemukan'], 404);
+
+    $detail = $hasil->detail;
+    $reconstructed = false;
+    if (empty($detail) || !is_array($detail)) {
+        // Attempt lama (sebelum snapshot disimpan): tak ada rincian jawaban
+        // peserta yang tersimpan, jadi kembalikan soal terkait bila masih ada.
+        $reconstructed = true;
+        $detail = [];
+    }
+
+    return response()->json(['success' => true, 'data' => array_merge($hasil->toArray(), [
+        'reconstructed' => $reconstructed,
+    ])]);
+});
+
+// Daftar percobaan ujian milik satu peserta (dipakai Admin/Instruktur).
+Route::get('/pendaftar/{id}/hasil-ujian', function (\Illuminate\Http\Request $request, string $id) {
+    $pendaftar = \App\Models\Pendaftar::with('program')->find($id);
+    if (!$pendaftar) return response()->json(['success' => false, 'message' => 'Peserta tidak ditemukan'], 404);
+    $query = \App\Models\HasilUjian::where('pendaftar_id', $id);
+    if ($request->filled('tipe')) $query->where('tipe', $request->tipe);
+    $list = $query->orderBy('tanggal', 'desc')->get();
     return response()->json(['success' => true, 'data' => $list]);
 });
 
 // Pembayaran routes
 Route::get('/pendaftar/{id}/pembayaran', [PembayaranController::class, 'info']);
 Route::post('/pendaftar/{id}/pembayaran', [PembayaranController::class, 'store']);
+Route::post('/pendaftar/{id}/pembayaran/manual', [PembayaranController::class, 'storeManual']);
+
+// Riwayat seluruh transaksi pembayaran (menu Histori Pembayaran admin).
+// Filter: status, tipe_pembayaran, search (nama/no.pendaftaran/nik),
+// tanggal_dari, tanggal_sampai (berdasar tanggal_bayar).
+Route::get('/pembayaran', function (\Illuminate\Http\Request $request) {
+    $query = \App\Models\Pembayaran::with(['tagihan.pendaftar.program', 'paymentMethod']);
+    if ($request->filled('status')) $query->where('status', $request->status);
+    if ($request->filled('tipe_pembayaran')) $query->where('tipe_pembayaran', $request->tipe_pembayaran);
+    if ($request->filled('tanggal_dari')) $query->whereDate('tanggal_bayar', '>=', $request->tanggal_dari);
+    if ($request->filled('tanggal_sampai')) $query->whereDate('tanggal_bayar', '<=', $request->tanggal_sampai);
+    if ($request->filled('search')) {
+        $q = $request->search;
+        $query->whereHas('tagihan.pendaftar', function ($sq) use ($q) {
+            $sq->where('nama_lengkap', 'like', "%$q%")
+                ->orWhere('no_pendaftaran', 'like', "%$q%")
+                ->orWhere('nik', 'like', "%$q%");
+        });
+    }
+    $list = $query->orderBy('tanggal_bayar', 'desc')->paginate($request->input('per_page', 20));
+    return response()->json(['success' => true, 'data' => $list]);
+});
 Route::patch('/pendaftar/{id}/pembayaran/verifikasi', [PembayaranController::class, 'verify']);
 Route::patch('/pendaftar/{id}/pembayaran/tolak', [PembayaranController::class, 'reject']);
 Route::patch('/pembayaran/{id}/verifikasi', [PembayaranController::class, 'verifyTransaction']);

@@ -231,13 +231,26 @@ class JadwalPelatihanController extends Controller
             'pendaftar_ids.*' => 'exists:pendaftars,id',
         ]);
         $jadwal = JadwalPelatihan::findOrFail($id);
+        if ($jadwal->angkatan_id) {
+            $ang = \App\Models\Angkatan::find($jadwal->angkatan_id);
+            if ($ang && $ang->status === 'Selesai') {
+                return response()->json(['success' => false, 'message' => 'Angkatan sudah Selesai — plotting dikunci.'], 422);
+            }
+        }
         $jadwal->peserta()->syncWithoutDetaching($request->pendaftar_ids);
         return response()->json(['success' => true, 'message' => count($request->pendaftar_ids) . ' peserta ditambahkan ke jadwal.']);
     }
 
     public function removePeserta(string $id, string $pendaftarId)
     {
-        JadwalPelatihan::findOrFail($id)->peserta()->detach($pendaftarId);
+        $jadwal = JadwalPelatihan::findOrFail($id);
+        if ($jadwal->angkatan_id) {
+            $ang = \App\Models\Angkatan::find($jadwal->angkatan_id);
+            if ($ang && $ang->status === 'Selesai') {
+                return response()->json(['success' => false, 'message' => 'Angkatan sudah Selesai — keanggotaan dikunci.'], 422);
+            }
+        }
+        $jadwal->peserta()->detach($pendaftarId);
         return response()->json(['success' => true, 'message' => 'Peserta dihapus dari jadwal.']);
     }
 

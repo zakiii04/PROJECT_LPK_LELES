@@ -854,8 +854,8 @@ export default function AdminPendaftarDetail({
             </div>
           )}
 
-          {/* Alokasi Angkatan & Tempat — hanya di menu Verifikasi */}
-          {mode === 'verifikasi' && (
+          {/* Alokasi Angkatan & Tempat — tampil di Validasi awal maupun Verifikasi */}
+          {(mode === 'verifikasi' || mode === 'validasi') && (
           <Section title="2. Alokasi Angkatan & Tempat Pelatihan (Koneksi Jadwal)">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-5 rounded-2xl bg-indigo-50/60 border border-indigo-100">
               <div>
@@ -907,12 +907,17 @@ export default function AdminPendaftarDetail({
                 )}
               </div>
             </div>
+            {mode === 'validasi' && (
+              <p className="text-[11px] text-indigo-700/80 italic mt-2 px-1">
+                Alokasi ini pratinjau awal — penetapan final dilakukan pada Tahap 2 Verifikasi.
+              </p>
+            )}
           </Section>
           )}
 
           {/* Data Fisik — menu Validasi & Verifikasi (input), menu Semua Peserta (tampilan) */}
           {mode !== 'semua' && (
-          <Section title={mode === 'validasi' ? '2. Data Fisik Peserta' : '3. Pemeriksaan Data Fisik & Ukuran Seragam'}>
+          <Section title={mode === 'validasi' ? '3. Data Fisik Peserta' : '3. Pemeriksaan Data Fisik & Ukuran Seragam'}>
             <div className="p-5 rounded-2xl bg-white border border-slate-200 space-y-4">
               <div className="grid grid-cols-3 gap-3">
                 <div>
