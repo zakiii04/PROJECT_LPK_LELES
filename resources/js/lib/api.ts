@@ -6,7 +6,7 @@ import type {
   ProgramPelatihan, CreateProgramPayload, UpdateProgramPayload,
   Angkatan, CreateAngkatanPayload, UpdateAngkatanPayload, AngkatanStatus,
   Pendaftar, CreatePendaftarPayload, PendaftarStatus,
-  PembayaranInfo, Cicilan, CreateCicilanPayload,
+  PembayaranInfo, Pembayaran,
   Interview, CreateInterviewPayload,
   JadwalPelatihan, CreateJadwalPayload,
   Kehadiran, CreateKehadiranPayload, BulkKehadiranPayload, KehadiranRekap,
@@ -15,6 +15,7 @@ import type {
   DashboardSummary, StatItem, UploadResponse,
   PaymentMethod, CreatePaymentMethodPayload,
   TempatPelatihan,
+  Instruktur,
 } from '@/lib/types';
 
 // Generic request handler — unwraps Laravel { success, data, message } envelope
@@ -117,10 +118,27 @@ export const tempatApi = {
     request<null>(apiClient.delete(`/tempat/${id}`)),
 };
 
+// ── Instruktur ──────────────────────────────────────
+export const instrukturApi = {
+  list: (params?: { status?: string; search?: string }) =>
+    request<Instruktur[]>(apiClient.get('/instruktur', { params })),
+  show: (id: string) =>
+    request<Instruktur>(apiClient.get(`/instruktur/${id}`)),
+  create: (data: Partial<Instruktur>) =>
+    request<Instruktur>(apiClient.post('/instruktur', data)),
+  update: (id: string, data: Partial<Instruktur>) =>
+    request<Instruktur>(apiClient.put(`/instruktur/${id}`, data)),
+  destroy: (id: string) =>
+    request<null>(apiClient.delete(`/instruktur/${id}`)),
+};
+
 // ── Pendaftar ────────────────────────────────────────
 export const pendaftarApi = {
   list: (params?: {
     status?: PendaftarStatus;
+    status_validasi?: string;
+    status_verifikasi?: string;
+    tahap?: 'validasi' | 'verifikasi' | 'selesai';
     angkatan_id?: string;
     program_id?: string;
     status_pembayaran?: string;
@@ -142,9 +160,33 @@ export const pendaftarApi = {
       berat_badan?: string;
       lingkar_pinggang?: string;
       berkas_verifikasi?: string[];
+      angkatan_id?: string;
+      tempat_pelatihan?: string;
     }
   ) =>
     request<Pendaftar>(apiClient.patch(`/pendaftar/${id}/status`, { status, ...verifikasiData })),
+  updateStatusAkhir: (id: string, status: PendaftarStatus) =>
+    request<Pendaftar>(apiClient.patch(`/pendaftar/${id}/status-akhir`, { status })),
+  validasi: (
+    id: string,
+    status: 'diterima' | 'ditolak',
+    data?: { catatan_validasi?: string; jenis_kelamin?: string }
+  ) =>
+    request<Pendaftar>(apiClient.patch(`/pendaftar/${id}/validasi`, { status, ...data })),
+  verifikasi: (
+    id: string,
+    status: 'diterima' | 'ditolak',
+    data?: {
+      tinggi_badan?: string;
+      berat_badan?: string;
+      lingkar_pinggang?: string;
+      berkas_verifikasi?: string[];
+      angkatan_id?: string;
+      tempat_pelatihan?: string;
+      catatan_verifikasi?: string;
+    }
+  ) =>
+    request<Pendaftar>(apiClient.patch(`/pendaftar/${id}/verifikasi`, { status, ...data })),
   alokasiAngkatan: (id: string, angkatan_id: string) =>
     request<Pendaftar>(apiClient.patch(`/pendaftar/${id}/angkatan`, { angkatan_id })),
   destroy: (id: string) =>
@@ -162,8 +204,6 @@ export const pendaftarApi = {
   // Sub-resources
   getPembayaran: (id: string) =>
     request<PembayaranInfo>(apiClient.get(`/pendaftar/${id}/pembayaran`)),
-  getCicilan: (id: string) =>
-    request<Cicilan[]>(apiClient.get(`/pendaftar/${id}/cicilan`)),
   getInterview: (id: string) =>
     request<Interview>(apiClient.get(`/pendaftar/${id}/interview`)),
   getHasilUjian: (id: string) =>
@@ -176,7 +216,7 @@ export const pendaftarApi = {
     request<Kelulusan>(apiClient.get(`/pendaftar/${id}/kelulusan`)),
 };
 
-// ── Pembayaran ───────────────────────────────────────
+// ── Pembayaran (tagihan + riwayat, tanpa cicilan) ─────────
 export const pembayaranApi = {
   uploadBukti: (pendaftarId: string, formData: FormData) =>
     request<Pendaftar>(
@@ -188,6 +228,10 @@ export const pembayaranApi = {
     request<null>(apiClient.patch(`/pendaftar/${pendaftarId}/pembayaran/verifikasi`)),
   tolak: (pendaftarId: string) =>
     request<null>(apiClient.patch(`/pendaftar/${pendaftarId}/pembayaran/tolak`)),
+  verifikasiTransaksi: (pembayaranId: string, lunaskan = false) =>
+    request<Pembayaran>(apiClient.patch(`/pembayaran/${pembayaranId}/verifikasi`, { lunaskan })),
+  tolakTransaksi: (pembayaranId: string, catatan?: string) =>
+    request<Pembayaran>(apiClient.patch(`/pembayaran/${pembayaranId}/tolak`, { catatan })),
 };
 
 export const paymentMethodApi = {
@@ -199,22 +243,6 @@ export const paymentMethodApi = {
     request<PaymentMethod>(apiClient.put(`/payment-methods/${id}`, p)),
   destroy: (id: string) =>
     request<null>(apiClient.delete(`/payment-methods/${id}`)),
-};
-
-// ── Cicilan ──────────────────────────────────────────
-export const cicilanApi = {
-  create: (pendaftarId: string, p: CreateCicilanPayload) =>
-    request<Cicilan[]>(apiClient.post(`/pendaftar/${pendaftarId}/cicilan`, p)),
-  uploadBukti: (cicilanId: string, formData: FormData) =>
-    request<Cicilan>(
-      apiClient.patch(`/cicilan/${cicilanId}/bayar`, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      }),
-    ),
-  verifikasi: (cicilanId: string) =>
-    request<null>(apiClient.patch(`/cicilan/${cicilanId}/verifikasi`)),
-  tolak: (cicilanId: string, catatan?: string) =>
-    request<null>(apiClient.patch(`/cicilan/${cicilanId}/tolak`, { catatan })),
 };
 
 // ── Interview ────────────────────────────────────────
@@ -241,6 +269,17 @@ export const jadwalApi = {
     request<JadwalPelatihan>(apiClient.post('/jadwal', p)),
   update: (id: string, p: Partial<CreateJadwalPayload>) =>
     request<JadwalPelatihan>(apiClient.put(`/jadwal/${id}`, p)),
+  updatePaket: (p: {
+    angkatan_id: string;
+    tempat_lama?: string;
+    tempat_pelatihan: string;
+    ruangan: string;
+    pengajar: string;
+    tanggal_mulai: string;
+    tanggal_selesai: string;
+    sesi?: { id: string; tanggal: string }[];
+  }) =>
+    request<JadwalPelatihan[]>(apiClient.put('/jadwal-paket', p)),
   destroy: (id: string) =>
     request<null>(apiClient.delete(`/jadwal/${id}`)),
   addPeserta: (jadwalId: string, pendaftar_ids: string[]) =>
@@ -267,7 +306,7 @@ export const kehadiranApi = {
 
 // ── Soal Ujian ───────────────────────────────────────
 export const soalApi = {
-  list: (params?: { tipe?: string; program_id?: string }) =>
+  list: (params?: { tipe?: string; program_id?: string; is_active?: boolean }) =>
     request<SoalUjian[]>(apiClient.get('/soal', { params })),
   show: (id: string) =>
     request<SoalUjian>(apiClient.get(`/soal/${id}`)),
@@ -282,6 +321,7 @@ export const soalApi = {
       p.opsi.forEach((o) => fd.append('opsi[]', o));
       fd.append('jawaban_benar', String(p.jawaban_benar));
       if (p.program_id) fd.append('program_id', p.program_id);
+      if (p.is_active !== undefined) fd.append('is_active', p.is_active ? '1' : '0');
       fd.append('gambar_soal', p.gambar_soal);
       return request<SoalUjian>(
         apiClient.post('/soal', fd, { headers: { 'Content-Type': 'multipart/form-data' } })
@@ -298,6 +338,7 @@ export const soalApi = {
       if (p.opsi) p.opsi.forEach((o) => fd.append('opsi[]', o));
       if (p.jawaban_benar !== undefined) fd.append('jawaban_benar', String(p.jawaban_benar));
       if (p.program_id) fd.append('program_id', p.program_id);
+      if (p.is_active !== undefined) fd.append('is_active', p.is_active ? '1' : '0');
       fd.append('gambar_soal', p.gambar_soal);
       fd.append('_method', 'PUT');
       return request<SoalUjian>(
@@ -306,6 +347,8 @@ export const soalApi = {
     }
     return request<SoalUjian>(apiClient.put(`/soal/${id}`, p));
   },
+  updateStatus: (id: string, is_active: boolean) =>
+    request<SoalUjian>(apiClient.patch(`/soal/${id}/status`, { is_active })),
   destroy: (id: string) =>
     request<null>(apiClient.delete(`/soal/${id}`)),
 };

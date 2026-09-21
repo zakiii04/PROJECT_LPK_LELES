@@ -136,7 +136,10 @@ export type UpdateAngkatanPayload = Partial<CreateAngkatanPayload>;
 
 // --- Pendaftar ---
 
-export type PendaftarStatus = 'menunggu' | 'diterima' | 'ditolak';
+export type PendaftarStatus = 'menunggu' | 'diterima' | 'ditolak' | 'lulus' | 'sudah_bekerja' | 'keluar';
+export type StatusValidasi = 'menunggu' | 'diterima' | 'ditolak';
+export type StatusVerifikasi = 'belum_proses' | 'menunggu' | 'diterima' | 'ditolak';
+export type JenisKelamin = 'Perempuan' | 'Laki-laki';
 export type StatusPembayaran = 'belum_bayar' | 'menunggu_konfirmasi' | 'lunas' | 'cicilan_sebagian';
 
 export interface Pendaftar {
@@ -144,10 +147,17 @@ export interface Pendaftar {
   no_pendaftaran: string;
   tanggal_daftar: string;
   status: PendaftarStatus;
+  status_validasi?: StatusValidasi;
+  status_verifikasi?: StatusVerifikasi;
+  catatan_validasi?: string | null;
+  catatan_verifikasi?: string | null;
+  tanggal_validasi?: string | null;
+  tanggal_verifikasi?: string | null;
   nama_lengkap: string;
   nik: string;
   tempat_lahir: string;
   tanggal_lahir: string;
+  jenis_kelamin?: string | null;
   alamat: string;
   provinsi?: string | null;
   kabupaten_kota?: string | null;
@@ -179,7 +189,6 @@ export interface Pendaftar {
   angkatan?: Angkatan;
   user?: User;
   interview?: Interview;
-  cicilan?: Cicilan[];
   tagihan?: Tagihan;
   kelulusan?: Kelulusan;
 }
@@ -189,6 +198,7 @@ export interface CreatePendaftarPayload {
   nik: string;
   tempat_lahir: string;
   tanggal_lahir: string;
+  jenis_kelamin: string;
   alamat: string;
   provinsi?: string;
   kabupaten_kota?: string;
@@ -205,31 +215,20 @@ export interface CreatePendaftarPayload {
   tahun_lulus?: number;
   jenis_pelatihan: string;
   program_id?: string;
+  tempat_pelatihan?: string;
   motivasi: string;
   biaya_pelatihan?: number;
 }
 
-// --- Cicilan ---
+// --- Tenggat Pelunasan (11 hari dari hari pertama pelatihan) ---
 
-export type CicilanStatus = 'belum_bayar' | 'menunggu_konfirmasi' | 'lunas' | 'ditolak';
-
-export interface Cicilan {
-  id: string;
-  termin: number;
-  jumlah: number;
-  jatuh_tempo: string;
-  status: CicilanStatus;
-  metode_pembayaran: string | null;
-  bukti_pembayaran: string | null;
-  tanggal_bayar: string | null;
-  tanggal_verifikasi: string | null;
-  catatan_admin: string | null;
-  pendaftar_id: string;
-}
-
-export interface CreateCicilanPayload {
-  jumlah_per_termin: number;
-  jumlah_termin: 2 | 3;
+export interface TenggatInfo {
+  hari_pertama: string | null;
+  batas_akhir: string | null;
+  batas_hari: number;
+  sisa_hari: number | null;
+  menunggak: boolean;
+  sisa_tagihan: number;
 }
 
 export type TagihanStatus = 'belum_lunas' | 'lunas';
@@ -323,6 +322,7 @@ export interface JadwalPelatihan {
   judul: string;
   jenis_pelatihan: string;
   angkatan_id?: string | null;
+  angkatan?: Angkatan | null;
   hari_ke?: number | null;
   tanggal: string;
   jam: string;
@@ -399,6 +399,7 @@ export interface SoalUjian {
   jawaban_benar: number;
   program_id: string | null;
   gambar_soal?: string | null;
+  is_active?: boolean;
 }
 
 export interface CreateSoalPayload {
@@ -409,6 +410,7 @@ export interface CreateSoalPayload {
   jawaban_benar: number;
   program_id?: string;
   gambar_soal?: File | string | null;
+  is_active?: boolean;
 }
 
 // --- Hasil Ujian ---
@@ -496,15 +498,18 @@ export interface UploadResponse {
   url: string;
 }
 
-// --- Pembayaran ---
+// --- Pembayaran (tagihan + riwayat pembayaran + tenggat) ---
 
 export interface PembayaranInfo {
-  status_pembayaran: StatusPembayaran | null;
-  jenis_pembayaran: 'lunas' | 'cicilan' | null;
-  biaya_pelatihan: number;
-  bukti_pembayaran: string | null;
-  tanggal_bayar: string | null;
-  cicilan: Cicilan[];
+  id: string;
+  pendaftar_id: string;
+  nominal: number;
+  status: TagihanStatus;
+  tanggal_bayar?: string | null;
+  tanggal_terakhir_bayar?: string | null;
+  pembayarans?: Pembayaran[];
+  pendaftar?: Pendaftar;
+  tenggat?: TenggatInfo | null;
 }
 
 // --- Form Helper ---
@@ -514,6 +519,7 @@ export interface PendaftarFormData {
   nik: string;
   tempat_lahir: string;
   tanggal_lahir: string;
+  jenis_kelamin?: string;
   alamat_lengkap: string;
   provinsi?: string;
   kabupaten_kota?: string;
@@ -553,6 +559,31 @@ export interface CreateTempatPayload {
   kapasitas: number;
   fasilitas: string;
   status?: 'Aktif' | 'Nonaktif';
+}
+
+// --- Instruktur ---
+
+export interface Instruktur {
+  id: string;
+  nama: string;
+  no_hp?: string | null;
+  email?: string | null;
+  keahlian?: string | null;
+  status: 'Aktif' | 'Nonaktif';
+  user_id?: string | null;
+  user?: { id: string; username: string; email: string; role: UserRole } | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface CreateInstrukturPayload {
+  nama: string;
+  no_hp?: string;
+  email?: string;
+  keahlian?: string;
+  status?: 'Aktif' | 'Nonaktif';
+  username?: string;
+  password?: string;
 }
 
 // --- Mata Pelajaran ---

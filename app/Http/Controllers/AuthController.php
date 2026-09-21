@@ -30,6 +30,14 @@ class AuthController extends Controller
             ], 401);
         }
 
+        // Instruktur yang dinonaktifkan tidak bisa login
+        if ($user->role === 'INSTRUKTUR' && $user->instruktur && $user->instruktur->status === 'Nonaktif') {
+            return response()->json([
+                'success' => false,
+                'message' => 'Akun instruktur Anda sedang nonaktif. Hubungi admin.',
+            ], 403);
+        }
+
         // Web session auth (agar auth()->user() di Inertia route bekerja)
         Auth::login($user, $request->boolean('remember'));
 
@@ -83,7 +91,7 @@ class AuthController extends Controller
 
         return response()->json([
             'success' => true,
-            'data'    => $user->load('pendaftar'),
+            'data'    => $user->load(['pendaftar', 'instruktur']),
         ]);
     }
 

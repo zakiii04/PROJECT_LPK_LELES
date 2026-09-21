@@ -4,6 +4,8 @@ import {
   type Pendaftar,
   getStatusLabel,
   getStatusBadgeClass,
+  getTahapLabel,
+  getTahapBadgeClass,
 } from '@/lib/storage';
 import Pagination from '@/Components/Pagination';
 
@@ -58,7 +60,8 @@ export default function AdminPendaftarTable({ data, onViewDetail, onDeletePendaf
             <th className="hidden md:table-cell">Program Pelatihan</th>
             <th className="hidden sm:table-cell">Tanggal Daftar</th>
             <th className="hidden xl:table-cell">Angkatan</th>
-            <th>Status Validasi</th>
+            <th>Status Akhir</th>
+            <th>Tahap</th>
             <th className="hidden lg:table-cell">Status Pembayaran</th>
             <th className="text-center">Aksi</th>
           </tr>
@@ -105,6 +108,9 @@ export default function AdminPendaftarTable({ data, onViewDetail, onDeletePendaf
                 <td>
                   <span className={getStatusBadgeClass(pendaftar.status)}>{getStatusLabel(pendaftar.status)}</span>
                 </td>
+                <td>
+                  <span className={getTahapBadgeClass(pendaftar)}>{getTahapLabel(pendaftar)}</span>
+                </td>
                 <td className="hidden lg:table-cell">
                   <span
                     className={
@@ -125,7 +131,7 @@ export default function AdminPendaftarTable({ data, onViewDetail, onDeletePendaf
                         : pendaftar.status_pembayaran === 'menunggu_konfirmasi'
                           ? 'Verifikasi'
                           : pendaftar.status_pembayaran === 'cicilan_sebagian'
-                            ? 'Cicilan'
+                            ? 'Sebagian'
                             : 'Belum Bayar'
                       : '-'}
                   </span>

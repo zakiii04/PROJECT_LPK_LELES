@@ -19,6 +19,7 @@ const initialFormData: PendaftarFormData = {
   nik: '',
   tempat_lahir: '',
   tanggal_lahir: '',
+  jenis_kelamin: '',
   alamat_lengkap: '',
   provinsi: '',
   kabupaten_kota: '',
@@ -77,6 +78,7 @@ export default function PendaftaranPage() {
         if (!birthdayPassed) age--;
         if (age < 18) newErrors.tanggal_lahir = 'Usia peserta harus minimal 18 tahun';
       }
+      if (!formData.jenis_kelamin?.trim()) newErrors.jenis_kelamin = 'Jenis kelamin wajib dipilih';
       if (!formData.alamat_lengkap.trim()) newErrors.alamat_lengkap = 'Alamat lengkap wajib diisi';
       if (!formData.provinsi?.trim()) newErrors.provinsi = 'Provinsi wajib dipilih';
       if (!formData.kabupaten_kota?.trim()) newErrors.kabupaten_kota = 'Kabupaten/Kota wajib dipilih';

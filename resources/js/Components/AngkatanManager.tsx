@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { angkatanApi, pendaftarApi, programApi, kelulusanApi } from '@/lib/api';
 import type { Angkatan, Pendaftar, AngkatanStatus, Program } from '@/lib/types';
+import { isAnggotaAngkatan, getStatusBadgeClass, getStatusLabel } from '@/lib/storage';
 import AdminPendaftarDetail from '@/Components/AdminPendaftarDetail';
 import DeleteConfirmModal from '@/Components/DeleteConfirmModal';
 import ActionToast, { useActionToast } from '@/Components/ActionToast';
@@ -164,7 +165,7 @@ export default function AngkatanManager({
       await angkatanApi.updateStatus(selectedAngkatanForCompletion.id, 'Selesai');
       setSelectedAngkatanForCompletion(null);
       await loadData();
-      showSuccess('edit', 'Angkatan Diselesaikan', 'Checklist kelulusan peserta telah disimpan.');
+      showSuccess('edit', 'Angkatan Diselesaikan', 'Kelulusan tersimpan. Peserta yang lulus otomatis berstatus Lulus dan tetap tercatat di angkatan.');
     } catch (err: any) {
       showError('Gagal Menyelesaikan Angkatan', err?.message || 'Kelulusan peserta belum tersimpan.');
     } finally {
@@ -313,9 +314,10 @@ export default function AngkatanManager({
     return dateB - dateA;
   });
 
-  // Hitung jumlah peserta terdaftar secara akurat dari pendaftarList / relasi / pendaftar_count
+  // Hitung jumlah peserta terdaftar secara akurat dari pendaftarList / relasi / pendaftar_count.
+  // Lulusan tetap dihitung sebagai anggota angkatan.
   const getFilledCount = (ang: Angkatan) => {
-    const listCount = pendaftarList.filter((p) => p.angkatan_id === ang.id && p.status === 'diterima').length;
+    const listCount = pendaftarList.filter((p) => p.angkatan_id === ang.id && isAnggotaAngkatan(p.status)).length;
     const relCount = (ang.pendaftar && Array.isArray(ang.pendaftar)) ? ang.pendaftar.length : 0;
     const serverCount = typeof ang.pendaftar_count === 'number' ? ang.pendaftar_count : 0;
     return Math.max(listCount, relCount, serverCount);
@@ -760,12 +762,13 @@ export default function AngkatanManager({
                       className="p-3.5 rounded-xl border border-slate-200 bg-slate-50/50 hover:bg-white hover:shadow-xs transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
                     >
                       <div className="space-y-1">
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-bold text-slate-400 font-mono text-[11px]">{idx + 1}.</span>
                           <span className="font-bold text-slate-800 text-sm">{p.nama_lengkap}</span>
                           <span className="font-mono text-[10px] text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-100">
                             {p.no_pendaftaran}
                           </span>
+                          <span className={getStatusBadgeClass(p.status)}>{getStatusLabel(p.status)}</span>
                         </div>
                         <div className="text-[11px] text-slate-500 font-mono">
                           NIK: {p.nik} • HP: {p.no_hp}
@@ -780,7 +783,7 @@ export default function AngkatanManager({
                             ? 'bg-amber-50 text-amber-700 border border-amber-200'
                             : 'bg-slate-100 text-slate-600 border border-slate-200'
                         }`}>
-                          {p.status_pembayaran === 'lunas' ? 'LUNAS' : p.status_pembayaran === 'cicilan_sebagian' ? 'CICILAN' : 'BELUM BAYAR'}
+                          {p.status_pembayaran === 'lunas' ? 'LUNAS' : p.status_pembayaran === 'cicilan_sebagian' ? 'SEBAGIAN' : 'BELUM BAYAR'}
                         </span>
 
                         <button

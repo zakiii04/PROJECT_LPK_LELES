@@ -3,6 +3,8 @@
 import { useState, useEffect } from 'react';
 import type { Pendaftar, Angkatan, TempatPelatihan } from '@/lib/types';
 import { pendaftarApi, angkatanApi, tempatApi } from '@/lib/api';
+import { parseAlamat, getStatusValidasi } from '@/lib/storage';
+import { pickDefaultAngkatan, resolveDefaultTempat, tempatLabel, tempatOptions } from '@/lib/penempatan';
 
 export interface VerifikasiPesertaModalProps {
   pendaftar: Pendaftar;
@@ -40,8 +42,12 @@ export default function VerifikasiPesertaModal({
   );
 
   const [loading, setLoading] = useState(false);
+  const [rejecting, setRejecting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [attemptedSubmit, setAttemptedSubmit] = useState(false);
+  const [catatanVerifikasi, setCatatanVerifikasi] = useState<string>(pendaftar.catatan_verifikasi || '');
+  const [angkatanHint, setAngkatanHint] = useState<string>('');
+  const lolosValidasi = getStatusValidasi(pendaftar) === 'diterima';
 
   useEffect(() => {
     Promise.all([angkatanApi.list(), tempatApi.list()]).then(([aRes, tRes]) => {
@@ -50,13 +56,21 @@ export default function VerifikasiPesertaModal({
       setAngkatanList(aData);
       setTempatList(tData);
 
-      if (!angkatanId && aData.length > 0) {
-        setAngkatanId(aData[0].id);
+      // Angkatan default: cocokkan program + rentang waktu pendaftaran
+      // mencakup tanggal daftar (bukan asal ambil index pertama).
+      if (!pendaftar.angkatan_id && aData.length > 0) {
+        const picked = pickDefaultAngkatan(aData, pendaftar);
+        if (picked.angkatan) {
+          setAngkatanId(picked.angkatan.id);
+          setAngkatanHint(picked.reason);
+        }
       }
-      if (!tempatPelatihan && tData.length > 0) {
-        setTempatPelatihan(`${tData[0].nama_tempat} (${tData[0].alamat_lengkap})`);
+      // Tempat default: prioritaskan input peserta.
+      if (!pendaftar.tempat_pelatihan && tData.length > 0) {
+        setTempatPelatihan(tempatLabel(tData[0]));
       }
     }).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // BMI calculation
@@ -107,6 +121,11 @@ export default function VerifikasiPesertaModal({
     setErrorMsg(null);
     setAttemptedSubmit(true);
 
+    if (!lolosValidasi) {
+      setErrorMsg('Pendaftar belum lolos Tahap 1 Validasi. Selesaikan validasi awal terlebih dahulu.');
+      return;
+    }
+
     if (eligibilityError) {
       setErrorMsg(`Verifikasi gagal: ${eligibilityError}`);
       return;
@@ -124,16 +143,22 @@ export default function VerifikasiPesertaModal({
       return;
     }
 
+    if (!angkatanId) {
+      setErrorMsg('Angkatan wajib dipilih. Peserta yang diterima otomatis masuk angkatan & jadwal.');
+      return;
+    }
+
     setLoading(true);
 
     try {
-      const res = await pendaftarApi.updateStatus(pendaftar.id, 'diterima', {
+      const res = await pendaftarApi.verifikasi(pendaftar.id, 'diterima', {
         tinggi_badan: tinggiBadan,
         berat_badan: beratBadan,
         lingkar_pinggang: lingkarPinggang,
         berkas_verifikasi: selectedBerkas,
         angkatan_id: angkatanId,
         tempat_pelatihan: tempatPelatihan,
+        catatan_verifikasi: catatanVerifikasi || undefined,
       });
 
       if (res.success) {
@@ -148,7 +173,33 @@ export default function VerifikasiPesertaModal({
     }
   };
 
+  const handleReject = async () => {
+    setErrorMsg(null);
+    if (!catatanVerifikasi.trim()) {
+      setErrorMsg('Alasan penolakan wajib diisi pada tahap verifikasi.');
+      return;
+    }
+    setRejecting(true);
+    try {
+      const res = await pendaftarApi.verifikasi(pendaftar.id, 'ditolak', {
+        catatan_verifikasi: catatanVerifikasi,
+      });
+      if (res.success) onSuccess();
+      else setErrorMsg(res.error || 'Gagal menolak peserta.');
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Terjadi kesalahan sistem.');
+    } finally {
+      setRejecting(false);
+    }
+  };
+
   const totalBiaya = pendaftar.program?.harga || pendaftar.biaya_pelatihan || 0;
+
+  const parsedAlamat = parseAlamat(pendaftar.alamat || '');
+  const displayProvinsi = pendaftar.provinsi || parsedAlamat.provinsi || '-';
+  const displayKota = pendaftar.kabupaten_kota || parsedAlamat.kabupaten_kota || '-';
+  const displayKecamatan = pendaftar.kecamatan || parsedAlamat.kecamatan || '-';
+  const displayKelurahan = pendaftar.desa_kelurahan || parsedAlamat.desa_kelurahan || '-';
 
   return (
     <div className="modal-overlay z-[9999]" onClick={onClose}>
@@ -166,9 +217,10 @@ export default function VerifikasiPesertaModal({
               </svg>
             </div>
             <div>
-              <h2 className="text-base font-bold text-slate-900">Verifikasi & Penempatan Peserta</h2>
+              <h2 className="text-base font-bold text-slate-900">Tahap 2 — Verifikasi & Penempatan Peserta</h2>
               <p className="text-xs text-slate-500 font-medium">
                 {pendaftar.nama_lengkap} • No. Reg: <span className="font-mono text-indigo-600 font-bold">{pendaftar.no_pendaftaran}</span>
+                {' • '}Validasi: <span className="font-bold text-emerald-700">Lolos</span>
               </p>
             </div>
           </div>
@@ -185,6 +237,11 @@ export default function VerifikasiPesertaModal({
 
         {/* Body */}
         <form onSubmit={handleSubmit} className="p-6 space-y-6 max-h-[78vh] overflow-y-auto">
+          {!lolosValidasi && (
+            <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-300 text-xs font-semibold text-amber-800">
+              Pendaftar ini belum lolos Tahap 1 Validasi. Selesaikan validasi awal dulu sebelum verifikasi berkas.
+            </div>
+          )}
           {errorMsg && (
             <div className="p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-xs font-semibold text-rose-700 flex items-start gap-2.5 shadow-2xs">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="shrink-0 mt-0.5 text-rose-600">
@@ -218,6 +275,7 @@ export default function VerifikasiPesertaModal({
               </div>
               <div>
                 <span className="text-slate-400 block text-[10px] font-bold">Jenis Kelamin</span>
+                <span className="font-semibold text-slate-800">{pendaftar.jenis_kelamin || '-'}</span>
               </div>
               <div>
                 <span className="text-slate-400 block text-[10px] font-bold">No. Handphone / WA</span>
@@ -232,8 +290,41 @@ export default function VerifikasiPesertaModal({
                 <span className="font-bold text-indigo-700">{pendaftar.program?.nama || pendaftar.jenis_pelatihan}</span>
               </div>
             </div>
-            <div className="text-[11px] text-slate-600 border-t border-indigo-100/60 pt-2">
-              <span className="font-bold text-slate-500">Alamat:</span> {pendaftar.alamat}
+
+            {/* Rincian Wilayah & Alamat Peserta */}
+            <div className="border-t border-indigo-100/70 pt-2.5 space-y-2">
+              <span className="text-slate-500 block text-[10px] font-bold uppercase tracking-wider">
+                Rincian Alamat & Wilayah Domisili
+              </span>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                <div className="bg-white/80 p-2 rounded-lg border border-indigo-100">
+                  <span className="text-[10px] font-bold text-slate-400 block uppercase">Provinsi</span>
+                  <span className="font-semibold text-slate-800 block truncate" title={displayProvinsi}>
+                    {displayProvinsi}
+                  </span>
+                </div>
+                <div className="bg-white/80 p-2 rounded-lg border border-indigo-100">
+                  <span className="text-[10px] font-bold text-slate-400 block uppercase">Kota / Kab</span>
+                  <span className="font-semibold text-slate-800 block truncate" title={displayKota}>
+                    {displayKota}
+                  </span>
+                </div>
+                <div className="bg-white/80 p-2 rounded-lg border border-indigo-100">
+                  <span className="text-[10px] font-bold text-slate-400 block uppercase">Kecamatan</span>
+                  <span className="font-semibold text-slate-800 block truncate" title={displayKecamatan}>
+                    {displayKecamatan}
+                  </span>
+                </div>
+                <div className="bg-white/80 p-2 rounded-lg border border-indigo-100">
+                  <span className="text-[10px] font-bold text-slate-400 block uppercase">Kelurahan / Desa</span>
+                  <span className="font-semibold text-slate-800 block truncate" title={displayKelurahan}>
+                    {displayKelurahan}
+                  </span>
+                </div>
+              </div>
+              <div className="text-[11px] text-slate-600 bg-white/70 p-2 rounded-lg border border-indigo-100/60">
+                <span className="font-bold text-slate-600">Alamat Lengkap:</span> {pendaftar.alamat || '-'}
+              </div>
             </div>
           </div>
 
@@ -254,7 +345,10 @@ export default function VerifikasiPesertaModal({
                 <select
                   className="form-input w-full text-xs font-bold text-indigo-900"
                   value={angkatanId}
-                  onChange={(e) => setAngkatanId(e.target.value)}
+                  onChange={(e) => {
+                    setAngkatanId(e.target.value);
+                    setAngkatanHint('Dipilih manual oleh admin.');
+                  }}
                   required
                 >
                   {angkatanList.map((a) => (
@@ -263,6 +357,9 @@ export default function VerifikasiPesertaModal({
                     </option>
                   ))}
                 </select>
+                {angkatanHint && (
+                  <p className="text-[11px] text-indigo-700/80 italic mt-1">{angkatanHint}</p>
+                )}
               </div>
 
               <div>
@@ -275,15 +372,19 @@ export default function VerifikasiPesertaModal({
                   onChange={(e) => setTempatPelatihan(e.target.value)}
                   required
                 >
-                  {tempatList.map((t) => {
-                    const fullLabel = `${t.nama_tempat} (${t.alamat_lengkap})`;
-                    return (
-                      <option key={t.id} value={fullLabel}>
-                        {fullLabel}
-                      </option>
-                    );
-                  })}
+                  {tempatOptions(tempatList, tempatPelatihan).map((label) => (
+                    <option key={label} value={label}>
+                      {label === pendaftar.tempat_pelatihan && pendaftar.tempat_pelatihan ? `${label} — pilihan peserta` : label}
+                    </option>
+                  ))}
                 </select>
+                {pendaftar.tempat_pelatihan && (
+                  <p className="text-[11px] text-emerald-700 italic mt-1">
+                    {tempatPelatihan === pendaftar.tempat_pelatihan
+                      ? 'Mengikuti pilihan peserta saat mendaftar, masih bisa diubah.'
+                      : `Diubah admin dari pilihan peserta: ${pendaftar.tempat_pelatihan}`}
+                  </p>
+                )}
               </div>
             </div>
             <p className="text-[11px] text-slate-500 italic">
@@ -431,15 +532,40 @@ export default function VerifikasiPesertaModal({
             </div>
           </div>
 
+          {/* Catatan verifikasi */}
+          <div>
+            <div className="flex items-center gap-2 mb-2">
+              <div className="w-1.5 h-4 rounded-full bg-indigo-600" />
+              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-900">
+                5. Catatan Verifikasi (wajib jika menolak)
+              </h3>
+            </div>
+            <textarea
+              value={catatanVerifikasi}
+              onChange={(e) => setCatatanVerifikasi(e.target.value)}
+              rows={2}
+              placeholder="Contoh: Berkas lengkap, fisik memenuhi syarat, siap masuk angkatan. / Ditolak karena berkas tidak lengkap."
+              className="form-input w-full text-xs"
+            />
+          </div>
+
           {/* Footer Buttons */}
           <div className="pt-4 border-t border-slate-100 flex items-center justify-end gap-3">
             <button
               type="button"
               onClick={onClose}
-              disabled={loading}
+              disabled={loading || rejecting}
               className="btn btn-secondary btn-sm"
             >
               Batal
+            </button>
+            <button
+              type="button"
+              onClick={handleReject}
+              disabled={loading || rejecting || !lolosValidasi}
+              className="btn btn-sm font-bold bg-rose-600 hover:bg-rose-700 text-white border-rose-600 disabled:opacity-60"
+            >
+              {rejecting ? 'Menolak...' : 'Tolak di Verifikasi'}
             </button>
             <span
               onClick={() => {
@@ -453,10 +579,10 @@ export default function VerifikasiPesertaModal({
             >
               <button
                 type="submit"
-                disabled={loading || Boolean(eligibilityError)}
-                aria-disabled={Boolean(eligibilityError)}
-                style={{ cursor: eligibilityError ? 'not-allowed' : 'pointer' }}
-                className={`btn btn-accent btn-sm flex items-center gap-2 px-5 font-bold ${eligibilityError
+                disabled={loading || rejecting || Boolean(eligibilityError) || !lolosValidasi}
+                aria-disabled={Boolean(eligibilityError) || !lolosValidasi}
+                style={{ cursor: eligibilityError || !lolosValidasi ? 'not-allowed' : 'pointer' }}
+                className={`btn btn-accent btn-sm flex items-center gap-2 px-5 font-bold ${eligibilityError || !lolosValidasi
                   ? 'pointer-events-none !cursor-not-allowed bg-slate-300 text-slate-500 border-slate-300'
                   : 'bg-indigo-600 hover:bg-indigo-700 text-white border-indigo-600'
                   }`}

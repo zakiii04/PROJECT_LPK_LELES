@@ -11,7 +11,12 @@ class Tagihan extends Model
     protected $keyType = 'string';
     public $incrementing = false;
 
-    protected $fillable = ['id', 'pendaftar_id', 'nominal', 'status'];
+    protected $fillable = ['id', 'pendaftar_id', 'nominal', 'status', 'tanggal_bayar', 'tanggal_terakhir_bayar'];
+
+    protected $casts = [
+        'tanggal_bayar' => 'datetime',
+        'tanggal_terakhir_bayar' => 'datetime',
+    ];
 
     protected static function booted(): void
     {

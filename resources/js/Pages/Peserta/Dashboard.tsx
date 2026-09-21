@@ -4,29 +4,22 @@ import { useState, useEffect, useCallback } from 'react';
 import { router } from '@inertiajs/react';
 import Navbar from '@/Components/Navbar';
 import PesertaPembayaranModal from '@/Components/PesertaPembayaranModal';
+import TenggatBanner from '@/Components/TenggatBanner';
 import CalendarView from '@/Components/CalendarView';
+import JadwalTable from '@/Components/JadwalTable';
 import CertificateView from '@/Components/CertificateView';
 import { pendaftarApi, ujianApi } from '@/lib/api';
 import { getToken } from '@/lib/axios';
 import {
   getStatusPembayaranBadgeClass,
   getStatusPembayaranLabel,
+  getStatusValidasi,
+  getStatusVerifikasi,
+  getTahapLabel,
+  getStatusLabel,
+  isSeleksiLolos,
 } from '@/lib/storage';
-import type { Pendaftar, Cicilan, Kelulusan, JadwalPelatihan, HasilUjian, SoalUjian } from '@/lib/types';
-
-function getCicilanSummary(pendaftar: Pendaftar) {
-  const cicilan = pendaftar.cicilan || [];
-  const totalDibayar = cicilan.filter(c => c.status === 'lunas').reduce((sum, c) => sum + c.jumlah, 0);
-  const terminLunas = cicilan.filter(c => c.status === 'lunas').length;
-  const terminTotal = cicilan.length;
-  const totalBiaya = pendaftar.program?.harga || pendaftar.biaya_pelatihan || 0;
-  const sisaPembayaran = Math.max(0, totalBiaya - totalDibayar);
-  const progressPersen = totalBiaya > 0 ? (totalDibayar / totalBiaya) * 100 : 0;
-
-  return {
-    totalDibayar, terminLunas, terminTotal, sisaPembayaran, progressPersen
-  };
-}
+import type { Pendaftar, Kelulusan, JadwalPelatihan, HasilUjian, SoalUjian } from '@/lib/types';
 
 type PesertaTab = 'pembayaran' | 'profile_peserta' | 'jadwal' | 'ujian' | 'rincian_program' | 'kelulusan';
 
@@ -155,27 +148,28 @@ export default function PesertaDashboardPage(props: PesertaDashboardProps) {
   const totalHargaFormatted =
     program?.harga_formatted ||
     (totalBiayaPelatihan > 0 ? `Rp ${totalBiayaPelatihan.toLocaleString('id-ID')}` : 'Rp 0');
-  const tagihanNominal = Number(pendaftar.tagihan?.nominal || totalBiayaPelatihan);
+  const tagihanNominal = Number(pendaftar.tagihan?.nominal ?? totalBiayaPelatihan);
   const pembayaranBaru = pendaftar.tagihan?.pembayarans || [];
   const pembayaranDiterima = pembayaranBaru.filter((payment) => payment.status === 'diterima');
   const pembayaranMenunggu = pembayaranBaru.filter((payment) => payment.status === 'menunggu_verifikasi');
+  // nominal tagihan dari server SUDAH berupa sisa (berkurang tiap validasi),
+  // jadi jangan dikurangi lagi dengan total yang diterima.
   const totalDibayarBaru = pembayaranDiterima.reduce((sum, payment) => sum + Number(payment.nominal || 0), 0);
-  const sisaTagihanBaru = Math.max(0, tagihanNominal - totalDibayarBaru);
+  const sisaTagihanBaru = Math.max(0, tagihanNominal);
   const statusTagihanBaru = pendaftar.tagihan?.status === 'lunas' || sisaTagihanBaru <= 0 ? 'lunas' : 'belum_lunas';
-  const progressTagihanBaru = tagihanNominal > 0 ? Math.min(100, (totalDibayarBaru / tagihanNominal) * 100) : 0;
+  const progressTagihanBaru = totalBiayaPelatihan > 0 ? Math.min(100, (totalDibayarBaru / totalBiayaPelatihan) * 100) : 0;
   const filteredJadwal = jadwalList.filter((j) => {
     // 1. Jadwal harus sesuai dengan angkatan peserta saat ini (mencegah jadwal angkatan lama tampil)
     if (pendaftar.angkatan_id && j.angkatan_id && j.angkatan_id !== pendaftar.angkatan_id) {
       return false;
     }
-    // 2. Jika jadwal memiliki relasi peserta termuat, pastikan peserta masih terdaftar (jika dikeluarkan admin, ikut hilang)
-    if (j.peserta && Array.isArray(j.peserta) && j.peserta.length > 0) {
-      const isEnrolled = j.peserta.some((p) =>
+    // 2. Hanya tampilkan jadwal yang ditempati peserta. Bila relasi peserta
+    // termuat (mis. setelah admin mengeluarkan peserta dari sesi), sesi yang
+    // tidak memuat peserta ini — termasuk yang daftarnya kosong — disembunyikan.
+    if (Array.isArray(j.peserta)) {
+      return j.peserta.some((p) =>
         typeof p === 'string' ? p === pendaftar.id : p.id === pendaftar.id
       );
-      if (!isEnrolled) {
-        return false;
-      }
     }
     return true;
   });
@@ -195,7 +189,13 @@ export default function PesertaDashboardPage(props: PesertaDashboardProps) {
   const pretestAttempts = pretestList.length;
   const posttestAttempts = posttestList.length;
 
-  const isUnverified = pendaftar.status !== 'diterima';
+  const isUnverified = !isSeleksiLolos(pendaftar.status);
+  const lockedNote =
+    pendaftar.status === 'keluar'
+      ? 'Anda tercatat Keluar (tidak melanjutkan pelatihan). Fitur ini dikunci. Hubungi admin bila ada kekeliruan.'
+      : pendaftar.status === 'ditolak'
+        ? 'Pendaftaran Anda ditolak admin. Fitur ini dikunci. Hubungi admin untuk informasi lebih lanjut.'
+        : null;
 
   return (
     <div className="min-h-screen bg-[var(--background)] flex flex-col lg:flex-row text-[var(--text-primary)]">
@@ -438,6 +438,81 @@ export default function PesertaDashboardPage(props: PesertaDashboardProps) {
 
         {/* Content Container */}
         <main className="flex-1 p-4 md:p-8 space-y-6">
+          {/* Timeline 2 tahap: Validasi -> Verifikasi -> Diterima */}
+          {(() => {
+            const v = pendaftar ? getStatusValidasi(pendaftar) : 'menunggu';
+            const ver = pendaftar ? getStatusVerifikasi(pendaftar) : 'belum_proses';
+            if (!pendaftar || pendaftar.status === 'diterima') return null;
+            if (pendaftar.status === 'lulus') {
+              return (
+                <div className="p-5 rounded-2xl bg-emerald-50 border border-emerald-200 shadow-xs text-emerald-950 flex items-start gap-4 animate-fade-in">
+                  <div className="w-10 h-10 rounded-xl bg-emerald-500 text-white flex items-center justify-center shrink-0 font-bold mt-0.5">✓</div>
+                  <div className="flex-1 text-xs sm:text-sm space-y-1">
+                    <div className="font-extrabold text-base">Selamat! Anda Dinyatakan Lulus 🎓</div>
+                    <p className="text-emerald-800 leading-relaxed">
+                      Status akhir Anda otomatis menjadi <strong>Lulus</strong>. Sertifikat digital dapat dilihat & diunduh di menu <strong>Kelulusan & Sertifikat</strong>.
+                    </p>
+                  </div>
+                </div>
+              );
+            }
+            if (pendaftar.status === 'sudah_bekerja') {
+              return (
+                <div className="p-5 rounded-2xl bg-indigo-50 border border-indigo-200 shadow-xs text-indigo-950 flex items-start gap-4 animate-fade-in">
+                  <div className="w-10 h-10 rounded-xl bg-indigo-500 text-white flex items-center justify-center shrink-0 font-bold mt-0.5">💼</div>
+                  <div className="flex-1 text-xs sm:text-sm space-y-1">
+                    <div className="font-extrabold text-base">Status: Sudah Bekerja</div>
+                    <p className="text-indigo-800 leading-relaxed">
+                      Selamat atas pekerjaan barunya! Riwayat pelatihan, nilai, dan sertifikat Anda tetap dapat diakses di portal ini.
+                    </p>
+                  </div>
+                </div>
+              );
+            }
+            if (pendaftar.status === 'keluar') {
+              return (
+                <div className="p-5 rounded-2xl bg-slate-100 border border-slate-300 shadow-xs text-slate-800 flex items-start gap-4 animate-fade-in">
+                  <div className="w-10 h-10 rounded-xl bg-slate-500 text-white flex items-center justify-center shrink-0 font-bold mt-0.5">✕</div>
+                  <div className="flex-1 text-xs sm:text-sm space-y-1">
+                    <div className="font-extrabold text-base">Anda Tercatat Keluar (Tidak Melanjutkan)</div>
+                    <p className="text-slate-600 leading-relaxed">
+                      Anda tercatat tidak melanjutkan pelatihan. Menu jadwal, ujian, dan kelulusan dikunci. Silakan hubungi admin bila ada kekeliruan.
+                    </p>
+                  </div>
+                </div>
+              );
+            }
+            return (
+              <div className="p-5 rounded-2xl bg-white border border-slate-200 shadow-xs space-y-3">
+                <div className="text-xs font-extrabold uppercase tracking-wider text-slate-500">Alur Pendaftaran Anda</div>
+                <div className="flex items-center gap-2 text-xs font-bold flex-wrap">
+                  <span className={`px-3 py-1.5 rounded-full border ${v === 'diterima' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : v === 'ditolak' ? 'bg-rose-50 text-rose-700 border-rose-200' : 'bg-amber-50 text-amber-700 border-amber-200'}`}>
+                    1. Validasi {v === 'diterima' ? '✓ Lolos' : v === 'ditolak' ? '✕ Ditolak' : '… Menunggu'}
+                  </span>
+                  <span className="text-slate-300">→</span>
+                  <span className={`px-3 py-1.5 rounded-full border ${ver === 'diterima' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : ver === 'ditolak' ? 'bg-rose-50 text-rose-700 border-rose-200' : ver === 'menunggu' ? 'bg-indigo-50 text-indigo-700 border-indigo-200' : 'bg-slate-50 text-slate-400 border-slate-200'}`}>
+                    2. Verifikasi {ver === 'diterima' ? '✓ Diterima' : ver === 'ditolak' ? '✕ Ditolak' : ver === 'menunggu' ? '… Menunggu' : 'Belum proses'}
+                  </span>
+                  <span className="text-slate-300">→</span>
+                  <span className="px-3 py-1.5 rounded-full border bg-slate-100 text-slate-500 border-slate-200">3. Masuk Angkatan & Jadwal</span>
+                </div>
+                {pendaftar.status === 'ditolak' && (
+                  <p className="text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-xl p-3">
+                    {v === 'ditolak'
+                      ? `Mohon maaf, pendaftaran Anda ditolak pada Tahap 1 Validasi. ${pendaftar.catatan_validasi ? `Alasan: ${pendaftar.catatan_validasi}` : 'Silakan hubungi admin untuk info lebih lanjut.'}`
+                      : `Mohon maaf, pendaftaran Anda ditolak pada Tahap 2 Verifikasi. ${pendaftar.catatan_verifikasi ? `Alasan: ${pendaftar.catatan_verifikasi}` : 'Silakan hubungi admin untuk info lebih lanjut.'}`}
+                  </p>
+                )}
+                {pendaftar.status !== 'ditolak' && (
+                  <p className="text-[11px] text-slate-500">
+                    {v === 'menunggu'
+                      ? 'Berkas awal Anda sedang dicek admin (tahap validasi: jenis kelamin & keaslian data).'
+                      : 'Selamat! Anda lolos validasi. Berkas & data fisik Anda sedang diverifikasi admin sebelum masuk angkatan.'}
+                  </p>
+                )}
+              </div>
+            );
+          })()}
           {/* Top Unverified Banner */}
           {pendaftar.status === 'menunggu' && (
             <div className="p-5 rounded-2xl bg-amber-50 border border-amber-200/80 shadow-xs text-amber-950 flex items-start gap-4 animate-fade-in">
@@ -449,13 +524,13 @@ export default function PesertaDashboardPage(props: PesertaDashboardProps) {
               </div>
               <div className="flex-1 text-xs sm:text-sm space-y-1">
                 <div className="font-extrabold text-amber-950 text-base flex items-center gap-2 flex-wrap">
-                  <span>Pendaftaran Anda Masih Menunggu Verifikasi Admin</span>
+                  <span>Pendaftaran Anda Masih Menunggu ({pendaftar.status === 'menunggu' ? getTahapLabel(pendaftar) : 'Menunggu'})</span>
                   <span className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-amber-200 text-amber-900 border border-amber-300">
                     Status: Menunggu Validasi
                   </span>
                 </div>
                 <p className="text-amber-800 leading-relaxed">
-                  Akun Anda sudah aktif. Namun, menu <strong>Jadwal Pelatihan</strong>, <strong>Pretest/Posttest</strong>, serta <strong>Kelulusan & Sertifikat</strong> masih <strong>terkunci (🔒)</strong> sampai data fisik dan berkas Anda divalidasi oleh Admin LPK Alkautsar. Silakan datang ke kantor LPK untuk cek ulang fisik & verifikasi dokumen.
+                  Akun Anda sudah aktif. Namun, menu <strong>Jadwal Pelatihan</strong>, <strong>Pretest/Posttest</strong>, serta <strong>Kelulusan & Sertifikat</strong> masih <strong>terkunci (🔒)</strong> sampai Anda lolos <strong>Tahap 1 Validasi</strong> lalu <strong>Tahap 2 Verifikasi</strong> oleh Admin. Pantau timeline alur di atas untuk posisi berkas Anda.
                 </p>
               </div>
             </div>
@@ -479,8 +554,8 @@ export default function PesertaDashboardPage(props: PesertaDashboardProps) {
                 <span className="px-3.5 py-1.5 rounded-xl bg-slate-100 text-slate-700 font-mono text-xs font-bold border border-slate-200">
                   No: {pendaftar.no_pendaftaran}
                 </span>
-                <span className={`px-3.5 py-1.5 rounded-xl text-xs font-bold ${pendaftar.status === 'diterima' ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' : pendaftar.status === 'ditolak' ? 'bg-rose-100 text-rose-800 border border-rose-200' : 'bg-amber-100 text-amber-800 border border-amber-200'}`}>
-                  Status: {pendaftar.status === 'diterima' ? 'Diterima' : pendaftar.status === 'ditolak' ? 'Ditolak' : 'Menunggu Verifikasi'}
+                <span className={`px-3.5 py-1.5 rounded-xl text-xs font-bold ${pendaftar.status === 'diterima' || pendaftar.status === 'lulus' ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' : pendaftar.status === 'ditolak' || pendaftar.status === 'keluar' ? 'bg-rose-100 text-rose-800 border border-rose-200' : pendaftar.status === 'sudah_bekerja' ? 'bg-indigo-100 text-indigo-800 border border-indigo-200' : 'bg-amber-100 text-amber-800 border border-amber-200'}`}>
+                  Status: {pendaftar.status === 'menunggu' ? getTahapLabel(pendaftar) : getStatusLabel(pendaftar.status)}
                 </span>
               </div>
             </div>
@@ -532,6 +607,9 @@ export default function PesertaDashboardPage(props: PesertaDashboardProps) {
                     <div className="h-full rounded-full bg-emerald-500 transition-all" style={{ width: `${progressTagihanBaru}%` }} />
                   </div>
                 </div>
+                {statusTagihanBaru !== 'lunas' && (
+                  <TenggatBanner pendaftarId={pendaftar.id} />
+                )}
                 {pembayaranMenunggu.length > 0 && (
                   <div className="p-3 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-800">
                     {pembayaranMenunggu.length} pembayaran sedang menunggu validasi admin.
@@ -539,7 +617,7 @@ export default function PesertaDashboardPage(props: PesertaDashboardProps) {
                 )}
                 {statusTagihanBaru !== 'lunas' && (
                   <button onClick={() => setShowPaymentModal(true)} className="btn btn-primary btn-md w-full font-bold">
-                    Bayar Tagihan / Cicilan
+                    Bayar Tagihan
                   </button>
                 )}
                 {pembayaranBaru.length > 0 && (
@@ -557,237 +635,6 @@ export default function PesertaDashboardPage(props: PesertaDashboardProps) {
                 )}
               </div>
 
-              {/* If Belum Bayar */}
-              {false && (!pendaftar.status_pembayaran || pendaftar.status_pembayaran === 'belum_bayar') && (
-                <div className="p-6 rounded-2xl bg-[var(--primary-bg)] border border-[rgba(26,54,93,0.15)] flex flex-col md:flex-row items-center justify-between gap-4">
-                  <div>
-                    <h3 className="font-bold text-[var(--primary)] text-base mb-1">
-                      Selesaikan Pembayaran Pelatihan
-                    </h3>
-                    <p className="text-xs text-[var(--text-secondary)] max-w-md">
-                      Pilih metode pembayaran: <span className="font-bold text-[var(--text-primary)]">Bayar Lunas</span> atau <span className="font-bold text-[var(--text-primary)]">Cicilan 3x</span>.
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => setShowPaymentModal(true)}
-                    className="btn btn-primary btn-md flex-shrink-0 flex items-center gap-1.5 font-bold"
-                  >
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <rect x="1" y="4" width="22" height="16" rx="2" ry="2" />
-                      <line x1="1" y1="10" x2="23" y2="10" />
-                    </svg>
-                    <span>Bayar Sekarang</span>
-                  </button>
-                </div>
-              )}
-
-              {/* If Menunggu Konfirmasi (bayar lunas) */}
-              {false && pendaftar.status_pembayaran === 'menunggu_konfirmasi' && (
-                <div className="p-6 rounded-2xl bg-[var(--warning-bg)] border border-[rgba(221,107,32,0.2)] space-y-3">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-full bg-amber-500/20 text-amber-600 flex items-center justify-center font-bold text-lg">
-                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <circle cx="12" cy="12" r="10" />
-                        <polyline points="12 6 12 12 16 14" />
-                      </svg>
-                    </div>
-                    <div>
-                      <h3 className="font-bold text-amber-800 text-base">
-                        Bukti Pembayaran Sedang Diverifikasi
-                      </h3>                          <p className="text-xs text-amber-700">
-                        Metode Pembayaran: <span className="font-bold">{pendaftar.metode_pembayaran || 'Transfer Bank'}</span> • Dikirim pada: {new Date(pendaftar.tanggal_bayar || '').toLocaleString('id-ID')}
-                      </p>
-                    </div>
-                  </div>
-                  {pendaftar.bukti_pembayaran && (
-                    <div className="pt-2">
-                      <p className="text-xs text-[var(--text-tertiary)] mb-1 font-semibold">Lampiran Bukti Transfer Anda:</p>
-                      <img
-                        src={pendaftar.bukti_pembayaran}
-                        alt="Bukti Transfer"
-                        className="max-h-48 rounded-lg border border-[var(--card-border)] bg-white p-1"
-                      />
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* If Cicilan Sebagian — NEW */}
-              {false && pendaftar.status_pembayaran === 'cicilan_sebagian' && (() => {
-                const cicilanList: Cicilan[] = pendaftar.cicilan || [];
-                const summary = getCicilanSummary(pendaftar);
-
-                const getCicilanStatusIcon = (status: Cicilan['status']) => {
-                  switch (status) {
-                    case 'lunas': return 'OK';
-                    case 'menunggu_konfirmasi': return 'WAIT';
-                    case 'ditolak': return 'ERR';
-                    default: return 'PAY';
-                  }
-                };
-
-                const getCicilanStatusColor = (status: Cicilan['status']) => {
-                  switch (status) {
-                    case 'lunas': return 'bg-emerald-500 text-white border-emerald-500';
-                    case 'menunggu_konfirmasi': return 'bg-amber-400 text-white border-amber-400';
-                    case 'ditolak': return 'bg-red-500 text-white border-red-500';
-                    default: return 'bg-white text-slate-400 border-slate-300';
-                  }
-                };
-
-                const getCicilanStatusLabel = (status: Cicilan['status']) => {
-                  switch (status) {
-                    case 'lunas': return 'Lunas (Diverifikasi)';
-                    case 'menunggu_konfirmasi': return 'Menunggu Konfirmasi Admin';
-                    case 'ditolak': return 'Bukti Ditolak';
-                    default: return 'Belum Dibayar';
-                  }
-                };
-
-                const hasPayable = cicilanList.some(c => c.status === 'belum_bayar' || c.status === 'ditolak');
-
-                return (
-                  <div className="p-6 rounded-2xl bg-white border border-[var(--card-border)] space-y-4">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-100">
-                      <div>
-                        <span className="badge badge-processing mb-1">Skema Cicilan 3x</span>
-                        <h3 className="font-bold text-slate-800 text-lg">Status Pembayaran Angsuran</h3>
-                        <p className="text-xs text-slate-500">
-                          Terbayar {summary.terminLunas} dari {summary.terminTotal} termin • Total Terbayar: Rp {summary.totalDibayar.toLocaleString('id-ID')}
-                        </p>
-                      </div>
-                      <div className="text-right sm:text-right">
-                        <div className="text-[10px] text-slate-400 font-bold uppercase">Sisa Tagihan:</div>
-                        <div className="text-xl font-extrabold text-indigo-600">Rp {summary.sisaPembayaran.toLocaleString('id-ID')}</div>
-                      </div>
-                    </div>
-
-                    {/* Progress Bar */}
-                    <div>
-                      <div className="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden">
-                        <div
-                          className="h-full bg-gradient-to-r from-indigo-500 to-emerald-500 rounded-full transition-all duration-500"
-                          style={{ width: `${summary.progressPersen}%` }}
-                        />
-                      </div>
-                    </div>
-
-                    {/* Timeline 3 Termin */}
-                    <div className="space-y-3 pt-2">
-                      {cicilanList.map((c) => (
-                        <div
-                          key={c.id}
-                          className={`p-4 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${c.status === 'menunggu_konfirmasi'
-                            ? 'bg-amber-50/50 border-amber-200'
-                            : c.status === 'lunas'
-                              ? 'bg-emerald-50/30 border-emerald-200'
-                              : c.status === 'ditolak'
-                                ? 'bg-red-50/40 border-red-200'
-                                : 'bg-slate-50/50 border-slate-200'
-                            }`}
-                        >
-                          <div className="flex items-start gap-3">
-                            <div className={`w-8 h-8 rounded-full flex items-center justify-center text-[10px] font-extrabold border ${getCicilanStatusColor(c.status)}`}>
-                              {getCicilanStatusIcon(c.status)}
-                            </div>
-                            <div>
-                              <div className="flex items-center gap-2">
-                                <h4 className="font-bold text-xs text-slate-800">Termin {c.termin}</h4>
-                                <span className="text-[10px] font-bold text-slate-500 font-mono">
-                                  ({getCicilanStatusLabel(c.status)})
-                                </span>
-                              </div>
-                              <div className="text-xs text-[var(--text-secondary)] space-y-0.5">
-                                <div>Nominal: <span className="font-bold text-[var(--text-primary)]">Rp {c.jumlah.toLocaleString('id-ID')}</span></div>
-                                <div>Jatuh tempo: {new Date(c.jatuh_tempo).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}</div>
-                                {c.tanggal_bayar && (
-                                  <div className="text-[10px]">Dibayar: {new Date(c.tanggal_bayar).toLocaleString('id-ID')}</div>
-                                )}
-                                {c.catatan_admin && (
-                                  <div className="mt-1 p-2 rounded bg-red-50 text-red-700 text-[10px] border border-red-200">
-                                    <span className="font-bold">Catatan Admin:</span> {c.catatan_admin}
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-
-                    {hasPayable && (
-                      <button
-                        onClick={() => setShowPaymentModal(true)}
-                        className="btn btn-primary btn-md w-full flex items-center justify-center gap-1.5 font-bold"
-                      >
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <rect x="1" y="4" width="22" height="16" rx="2" ry="2" />
-                          <line x1="1" y1="10" x2="23" y2="10" />
-                        </svg>
-                        <span>Bayar Cicilan Berikutnya</span>
-                      </button>
-                    )}
-                  </div>
-                );
-              })()}
-
-              {/* If Lunas */}
-              {false && pendaftar.status_pembayaran === 'lunas' && (
-                <div className="p-6 rounded-2xl bg-[var(--accent-bg)] border border-[rgba(43,108,176,0.2)] space-y-4">
-                  <div className="flex items-center justify-between flex-wrap gap-3">
-                    <div className="flex items-center gap-3">
-                      <div className="w-12 h-12 rounded-2xl bg-[var(--accent)] text-white flex items-center justify-center font-bold text-2xl">
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                          <polyline points="20 6 9 17 4 12" />
-                        </svg>
-                      </div>
-                      <div>
-                        <h3 className="font-bold text-[var(--text-primary)] text-lg">
-                          Pembayaran Lunas
-                        </h3>
-                        <p className="text-xs text-[var(--text-secondary)]">
-                          Pembayaran Anda telah dikonfirmasi oleh Admin. Anda resmi menjadi peserta pelatihan LPK!
-                        </p>
-                      </div>
-                    </div>
-                    <button onClick={() => window.print()} className="btn btn-outline btn-sm flex items-center gap-1.5 font-bold">
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <polyline points="6 9 6 2 18 2 18 9" />
-                        <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" />
-                        <rect x="6" y="14" width="12" height="8" />
-                      </svg>
-                      <span>Cetak Kwitansi</span>
-                    </button>
-                  </div>
-
-                  <div className="p-4 rounded-xl bg-white border border-[var(--card-border)] text-xs space-y-2 font-mono">
-                    <div className="flex justify-between border-b pb-2">
-                      <span className="text-[var(--text-tertiary)]">No. Kwitansi</span>
-                      <span className="font-bold text-[var(--primary)]">KW-{pendaftar.no_pendaftaran.replace('LPK-', '')}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-[var(--text-tertiary)]">Nama Peserta</span>
-                      <span className="font-semibold">{pendaftar.nama_lengkap}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-[var(--text-tertiary)]">Program Pelatihan</span>
-                      <span className="font-semibold">{program?.nama || pendaftar.jenis_pelatihan}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-[var(--text-tertiary)]">Jenis Pembayaran</span>
-                      <span className="font-semibold">{pendaftar.jenis_pembayaran === 'cicilan' ? 'Cicilan 3x' : 'Lunas'}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-[var(--text-tertiary)]">Metode Bayar</span>
-                      <span>{pendaftar.metode_pembayaran || 'Transfer Bank'}</span>
-                    </div>
-                    <div className="flex justify-between border-t pt-2 text-sm">
-                      <span className="font-bold">TOTAL DIBAYAR</span>
-                      <span className="font-bold text-emerald-600">{totalHargaFormatted}</span>
-                    </div>
-                  </div>
-                </div>
-              )}
             </div>
           )}
 
@@ -829,7 +676,7 @@ export default function PesertaDashboardPage(props: PesertaDashboardProps) {
           {/* TAB 3: JADWAL PELATIHAN */}
           {activeTab === 'jadwal' && (
             isUnverified ? (
-              <LockedTabCard title="Jadwal Pelatihan" tabName="Jadwal Pelatihan & Sesi Kelas" />
+              <LockedTabCard title="Jadwal Pelatihan" tabName="Jadwal Pelatihan & Sesi Kelas" note={lockedNote} />
             ) : (
               <div className="glass-card-static p-6 md:p-8 animate-fade-in space-y-6">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[var(--card-border)]">
@@ -850,36 +697,19 @@ export default function PesertaDashboardPage(props: PesertaDashboardProps) {
                       className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${jadwalViewMode === 'list' ? 'bg-white text-[var(--primary)] shadow-sm' : 'text-slate-500 hover:text-slate-800'
                         }`}
                     >
-                      Tampilan List
-                    </button>
-                  </div>
+                      Tampilan Tabel
+                      </button>
+                    </div>
                 </div>
 
                 {jadwalViewMode === 'calendar' ? (
                   <CalendarView events={filteredJadwal} />
                 ) : (
-                  <div className="space-y-4">
-                    {filteredJadwal.length === 0 ? (
-                      <div className="text-center py-12 text-[var(--text-tertiary)] text-sm">
-                        Belum ada jadwal khusus yang dipublikasikan oleh Admin untuk program Anda.
-                      </div>
-                    ) : (
-                      filteredJadwal.map((j) => (
-                        <div key={j.id} className="p-4 rounded-xl bg-[var(--surface)] flex flex-col sm:flex-row sm:items-center justify-between gap-3 border border-[var(--card-border)]">
-                          <div>
-                            <div className="flex items-center gap-2 mb-1">
-                              <span className="text-xs font-bold px-2.5 py-0.5 rounded bg-[var(--primary-bg)] text-[var(--primary)] border border-[rgba(79,70,229,0.2)]">
-                                {j.jenis_sesi}
-                              </span>
-                              <span className="text-xs text-[var(--text-tertiary)]">Ruangan: {j.ruangan}</span>
-                            </div>
-                            <h4 className="font-bold text-[var(--text-primary)] text-sm">{j.judul}</h4>
-                            <p className="text-xs text-[var(--text-secondary)] mt-0.5">{j.tanggal} • {j.jam}</p>
-                          </div>
-                        </div>
-                      ))
-                    )}
-                  </div>
+                  <JadwalTable
+                    schedules={filteredJadwal}
+                    variant="peserta"
+                    emptyText="Belum ada jadwal khusus yang dipublikasikan oleh Admin untuk program Anda."
+                  />
                 )}
               </div>
             )
@@ -888,7 +718,7 @@ export default function PesertaDashboardPage(props: PesertaDashboardProps) {
           {/* TAB 4: PRETEST & POSTTEST */}
           {activeTab === 'ujian' && (
             isUnverified ? (
-              <LockedTabCard title="Evaluasi Pretest & Posttest" tabName="Pengerjaan Ujian Online (CBT)" />
+              <LockedTabCard title="Evaluasi Pretest & Posttest" tabName="Pengerjaan Ujian Online (CBT)" note={lockedNote} />
             ) : (
               <div className="glass-card-static p-6 md:p-8 animate-fade-in space-y-6">
                 <div className="pb-4 border-b border-[var(--card-border)]">
@@ -1083,7 +913,7 @@ export default function PesertaDashboardPage(props: PesertaDashboardProps) {
           {/* TAB 6: KELULUSAN & SERTIFIKAT */}
           {activeTab === 'kelulusan' && (
             isUnverified ? (
-              <LockedTabCard title="Kelulusan & Sertifikat" tabName="Status Kelulusan & Unduh Sertifikat" />
+              <LockedTabCard title="Kelulusan & Sertifikat" tabName="Status Kelulusan & Unduh Sertifikat" note={lockedNote} />
             ) : (
               <div className="glass-card-static p-6 md:p-8 animate-fade-in space-y-6">
                 {kelulusanRecord && kelulusanRecord.status_kelulusan === 'Lulus' ? (
@@ -1151,6 +981,7 @@ function ExamRunnerModal({
 }) {
   const [soalList, setSoalList] = useState<SoalUjian[]>([]);
   const [userAnswers, setUserAnswers] = useState<{ [soalId: string]: number }>({});
+  const [opsiMaps, setOpsiMaps] = useState<Record<string, number[]>>({});
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [hasilSummary, setHasilSummary] = useState<HasilUjian | null>(null);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -1160,7 +991,28 @@ function ExamRunnerModal({
       const programId = pendaftar.program_id || (pendaftar.jenis_pelatihan ? 'program-default' : '');
       const res = await ujianApi.mulai({ tipe, program_id: programId });
       if (res.success && res.data) {
-        setSoalList(res.data);
+        // Acak urutan soal + acak abjad jawaban per peserta
+        const shuffled = [...res.data];
+        for (let i = shuffled.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+        }
+        const maps: Record<string, number[]> = {};
+        const randomized = shuffled.map((soal) => {
+          const idxArr = soal.opsi.map((_, i) => i);
+          for (let i = idxArr.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [idxArr[i], idxArr[j]] = [idxArr[j], idxArr[i]];
+          }
+          maps[soal.id] = idxArr;
+          return {
+            ...soal,
+            opsi: idxArr.map((orig) => soal.opsi[orig]),
+            jawaban_benar: idxArr.indexOf(soal.jawaban_benar),
+          };
+        });
+        setSoalList(randomized);
+        setOpsiMaps(maps);
         setCurrentIndex(0);
       }
     };
@@ -1179,10 +1031,16 @@ function ExamRunnerModal({
   const handleSubmitExam = async () => {
     let correctCount = 0;
     const jawaban = soalList.map((soal) => {
-      if (userAnswers[soal.id] === soal.jawaban_benar) {
+      const jawabanAcak = userAnswers[soal.id] ?? -1;
+      if (jawabanAcak === soal.jawaban_benar) {
         correctCount += 1;
       }
-      return { soal_id: soal.id, jawaban: userAnswers[soal.id] ?? -1 };
+      const map = opsiMaps[soal.id];
+      const jawabanAsli =
+        jawabanAcak === -1 || !map || map[jawabanAcak] === undefined
+          ? jawabanAcak
+          : map[jawabanAcak];
+      return { soal_id: soal.id, jawaban: jawabanAsli };
     });
 
     const res = await ujianApi.submit({
@@ -1338,7 +1196,7 @@ function ExamRunnerModal({
   );
 }
 
-function LockedTabCard({ title, tabName }: { title: string; tabName: string }) {
+function LockedTabCard({ title, tabName, note }: { title: string; tabName: string; note?: string | null }) {
   return (
     <div className="glass-card-static p-8 md:p-12 text-center max-w-xl mx-auto my-6 space-y-4 border border-amber-200/80 bg-amber-50/50 rounded-2xl shadow-xs animate-fade-in">
       <div className="w-16 h-16 rounded-2xl bg-amber-100 border border-amber-200 text-amber-600 flex items-center justify-center mx-auto shadow-xs">
@@ -1349,9 +1207,13 @@ function LockedTabCard({ title, tabName }: { title: string; tabName: string }) {
       </div>
       <div className="space-y-2">
         <h3 className="text-xl font-extrabold text-amber-950">Menu {title} Terkunci</h3>
-        <p className="text-xs sm:text-sm text-amber-800 leading-relaxed max-w-md mx-auto">
-          Status pendaftaran Anda saat ini <strong>Masih Menunggu Verifikasi Admin</strong>. Fitur <strong>{tabName}</strong> ini akan otomatis terbuka setelah data fisik dan berkas Anda divalidasi & diterima oleh Admin LPK Leles.
-        </p>
+        {note ? (
+          <p className="text-xs sm:text-sm text-amber-800 leading-relaxed max-w-md mx-auto">{note}</p>
+        ) : (
+          <p className="text-xs sm:text-sm text-amber-800 leading-relaxed max-w-md mx-auto">
+            Status pendaftaran Anda saat ini <strong>Masih Menunggu Verifikasi Admin</strong>. Fitur <strong>{tabName}</strong> ini akan otomatis terbuka setelah data fisik dan berkas Anda divalidasi & diterima oleh Admin LPK Leles.
+          </p>
+        )}
       </div>
       <div className="pt-2">
         <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-100 text-amber-900 border border-amber-300 text-xs font-semibold">

@@ -73,7 +73,9 @@ export default function GraduationManager() {
       showSuccess(
         'add',
         status_kelulusan === 'Lulus' ? 'Peserta Dinyatakan Lulus!' : 'Hasil Kelulusan Disimpan',
-        `Nilai akhir ${pendaftar.nama_lengkap}: ${nilai_akhir}`
+        status_kelulusan === 'Lulus'
+          ? `Nilai akhir ${pendaftar.nama_lengkap}: ${nilai_akhir}. Status akhir otomatis menjadi Lulus.`
+          : `Nilai akhir ${pendaftar.nama_lengkap}: ${nilai_akhir}`
       );
       if (status_kelulusan === 'Lulus' && res.data) {
         setSelectedKelulusanForCert(res.data);

@@ -16,10 +16,17 @@ class Pendaftar extends Model
         'no_pendaftaran',
         'tanggal_daftar',
         'status',
+        'status_validasi',
+        'status_verifikasi',
+        'catatan_validasi',
+        'catatan_verifikasi',
+        'tanggal_validasi',
+        'tanggal_verifikasi',
         'nama_lengkap',
         'nik',
         'tempat_lahir',
         'tanggal_lahir',
+        'jenis_kelamin',
         'alamat',
         'provinsi',
         'kabupaten_kota',
@@ -53,6 +60,8 @@ class Pendaftar extends Model
         'tanggal_daftar' => 'datetime',
         'tanggal_lahir' => 'date',
         'tanggal_bayar' => 'datetime',
+        'tanggal_validasi' => 'datetime',
+        'tanggal_verifikasi' => 'datetime',
         'berkas_verifikasi' => 'array',
     ];
 
@@ -87,11 +96,6 @@ class Pendaftar extends Model
     public function angkatan()
     {
         return $this->belongsTo(Angkatan::class, 'angkatan_id');
-    }
-
-    public function cicilan()
-    {
-        return $this->hasMany(Cicilan::class, 'pendaftar_id');
     }
 
     public function tagihan()

@@ -39,6 +39,8 @@ class Angkatan extends Model
 
     public function pendaftar()
     {
-        return $this->hasMany(Pendaftar::class, 'angkatan_id')->where('status', 'diterima');
+        // Anggota angkatan: diterima + yang sudah lulus / sudah bekerja.
+        // (Keluar/ditolak/menunggu bukan anggota.)
+        return $this->hasMany(Pendaftar::class, 'angkatan_id')->whereIn('status', ['diterima', 'lulus', 'sudah_bekerja']);
     }
 }

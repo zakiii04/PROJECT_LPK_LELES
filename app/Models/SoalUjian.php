@@ -20,10 +20,12 @@ class SoalUjian extends Model
         'jawaban_benar',
         'program_id',
         'gambar_soal',
+        'is_active',
     ];
 
     protected $casts = [
         'opsi' => 'array',
+        'is_active' => 'boolean',
     ];
 
     public function program()

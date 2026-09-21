@@ -34,6 +34,7 @@ export default function ManualRegisterModal({ isOpen, onClose, onSuccess }: Manu
   const [nik, setNik] = useState('');
   const [tempatLahir, setTempatLahir] = useState('Garut');
   const [tanggalLahir, setTanggalLahir] = useState('2001-01-01');
+  const [jenisKelamin, setJenisKelamin] = useState('Perempuan');
   const [noHp, setNoHp] = useState('');
   const [email, setEmail] = useState('');
   
@@ -78,6 +79,7 @@ export default function ManualRegisterModal({ isOpen, onClose, onSuccess }: Manu
         nik: nik,
         tempat_lahir: tempatLahir,
         tanggal_lahir: tanggalLahir,
+        jenis_kelamin: jenisKelamin,
         alamat: finalAlamat,
         provinsi: alamatState.provinsi,
         kabupaten_kota: alamatState.kabupaten_kota,
@@ -170,7 +172,7 @@ export default function ManualRegisterModal({ isOpen, onClose, onSuccess }: Manu
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
               <div>
                 <label className="form-label text-xs">Tempat Lahir</label>
                 <input
@@ -180,7 +182,6 @@ export default function ManualRegisterModal({ isOpen, onClose, onSuccess }: Manu
                   onChange={(e) => setTempatLahir(e.target.value)}
                 />
               </div>
-
               <div>
                 <label className="form-label text-xs">Tanggal Lahir</label>
                 <input
@@ -189,6 +190,18 @@ export default function ManualRegisterModal({ isOpen, onClose, onSuccess }: Manu
                   value={tanggalLahir}
                   onChange={(e) => setTanggalLahir(e.target.value)}
                 />
+              </div>
+
+              <div>
+                <label className="form-label text-xs">Jenis Kelamin *</label>
+                <select
+                  className="form-input text-xs"
+                  value={jenisKelamin}
+                  onChange={(e) => setJenisKelamin(e.target.value)}
+                >
+                  <option value="Perempuan">Perempuan</option>
+                  <option value="Laki-laki">Laki-laki</option>
+                </select>
               </div>
             </div>
 
@@ -264,7 +277,7 @@ export default function ManualRegisterModal({ isOpen, onClose, onSuccess }: Manu
                   onChange={(e) => setStatusPembayaran(e.target.value as any)}
                 >
                   <option value="lunas">🟢 Lunas</option>
-                  <option value="cicilan_sebagian">🟡 Cicilan</option>
+                  <option value="cicilan_sebagian">🟡 Sebagian</option>
                   <option value="belum_bayar">🔴 Belum Bayar</option>
                 </select>
               </div>

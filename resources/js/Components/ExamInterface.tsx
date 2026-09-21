@@ -14,6 +14,8 @@ interface ExamInterfaceProps {
   initialIdx?: number;
   endTimeMs?: number;
   storageKey?: string;
+  // opsiMaps[soalId][shuffledIdx] = originalIdx — untuk konversi jawaban acak ke index asli saat submit
+  opsiMaps?: Record<string, number[]>;
   onFinish: (nilai: number, total: number, benar: number) => void;
   onCancel: () => void;
 }
@@ -28,6 +30,7 @@ export default function ExamInterface({
   initialIdx = 0,
   endTimeMs,
   storageKey,
+  opsiMaps = {},
   onFinish,
   onCancel,
 }: ExamInterfaceProps) {
@@ -49,7 +52,7 @@ export default function ExamInterface({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [zoomImage, setZoomImage] = useState<string | null>(null);
 
-  // Sync / Persist progress to LocalStorage
+  // Sync / Persist progress to LocalStorage (termasuk opsiMaps agar urutan acak konsisten)
   const saveProgressToStorage = (
     answers: Record<number, number>,
     ragu: Record<number, boolean>,
@@ -61,6 +64,7 @@ export default function ExamInterface({
         storageKey,
         JSON.stringify({
           soalList,
+          opsiMaps,
           userAnswers: answers,
           raguRagu: ragu,
           currentIdx: idx,
@@ -151,11 +155,18 @@ export default function ExamInterface({
 
     let benarCount = 0;
     const jawabanPayload = soalList.map((soal, idx) => {
-      const jawaban = userAnswers[idx] ?? -1;
-      if (jawaban === soal.jawaban_benar) {
+      const jawabanAcak = userAnswers[idx] ?? -1;
+      // Nilai lokal dihitung dari opsi yang tampil (sudah diacak + jawaban_benar sudah disesuaikan)
+      if (jawabanAcak === soal.jawaban_benar) {
         benarCount += 1;
       }
-      return { soal_id: soal.id, jawaban };
+      // Konversi kembali ke index asli untuk penilaian server (DB menyimpan urutan asli)
+      const map = opsiMaps[soal.id];
+      const jawabanAsli =
+        jawabanAcak === -1 || !map || map[jawabanAcak] === undefined
+          ? jawabanAcak
+          : map[jawabanAcak];
+      return { soal_id: soal.id, jawaban: jawabanAsli };
     });
 
     const totalSoal = soalList.length;

@@ -38,4 +38,10 @@ class User extends Authenticatable
     {
         return $this->hasOne(\App\Models\Pendaftar::class, 'user_id');
     }
+
+    // Relasi ke Instruktur (akun login instruktur yang dibuat otomatis)
+    public function instruktur()
+    {
+        return $this->hasOne(\App\Models\Instruktur::class, 'user_id');
+    }
 }

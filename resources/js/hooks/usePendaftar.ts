@@ -69,9 +69,35 @@ export function useUpdatePendaftarStatus() {
         berat_badan?: string;
         lingkar_pinggang?: string;
         berkas_verifikasi?: string[];
+        angkatan_id?: string;
+        tempat_pelatihan?: string;
       };
     }) => {
       const res = await pendaftarApi.updateStatus(id, status, verifikasiData);
+      if (!res.success) throw new Error(res.error);
+      return res.data!;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['pendaftar'] }),
+  });
+}
+
+export function useValidasiPendaftar() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, status, data }: { id: string; status: 'diterima' | 'ditolak'; data?: { catatan_validasi?: string; jenis_kelamin?: string } }) => {
+      const res = await pendaftarApi.validasi(id, status, data);
+      if (!res.success) throw new Error(res.error);
+      return res.data!;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['pendaftar'] }),
+  });
+}
+
+export function useVerifikasiPendaftar() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, status, data }: { id: string; status: 'diterima' | 'ditolak'; data?: Parameters<typeof pendaftarApi.verifikasi>[2] }) => {
+      const res = await pendaftarApi.verifikasi(id, status, data);
       if (!res.success) throw new Error(res.error);
       return res.data!;
     },

@@ -1,21 +1,38 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { getStatusLabel, getStatusBadgeClass } from '@/lib/storage';
+import { getStatusLabel, getStatusBadgeClass, getStatusValidasi, getStatusVerifikasi, getTahapLabel, getTahapBadgeClass, STATUS_AKHIR_OPTIONS, composeAlamat, parseAlamat } from '@/lib/storage';
 import { pendaftarApi, angkatanApi, tempatApi, pembayaranApi } from '@/lib/api';
+import { pickDefaultAngkatan, resolveDefaultTempat, tempatLabel, tempatOptions } from '@/lib/penempatan';
 import type { Pendaftar, Angkatan, TempatPelatihan } from '@/lib/types';
 import { LIST_BERKAS_PERSYARATAN } from '@/Components/VerifikasiPesertaModal';
+import AlamatForm from '@/Components/AlamatForm';
+import TenggatBanner from '@/Components/TenggatBanner';
+
+export type DetailMode = 'validasi' | 'verifikasi' | 'semua';
 
 interface AdminPendaftarDetailProps {
   pendaftar: Pendaftar;
   onClose: () => void;
   onStatusChange: () => void;
+  /** Tampilan konten dibedakan per menu: validasi (identitas+fisik),
+   * verifikasi (identitas+fisik+angkatan/tempat+berkas), semua (ringkasan+status). */
+  mode?: DetailMode;
+  backLabel?: string;
 }
+
+const MODE_TITLE: Record<DetailMode, string> = {
+  validasi: 'Detail Validasi Awal — Identitas & Data Fisik',
+  verifikasi: 'Detail Verifikasi — Berkas, Fisik & Penempatan',
+  semua: 'Detail Peserta',
+};
 
 export default function AdminPendaftarDetail({
   pendaftar: initialPendaftar,
   onClose,
   onStatusChange,
+  mode = 'semua',
+  backLabel = 'Kembali ke Daftar Peserta',
 }: AdminPendaftarDetailProps) {
   const [currentPendaftar, setCurrentPendaftar] = useState<Pendaftar>(initialPendaftar);
   const [isEditingDataDiri, setIsEditingDataDiri] = useState(false);
@@ -24,6 +41,7 @@ export default function AdminPendaftarDetail({
   // Form State Edit Data Diri
   const [editNama, setEditNama] = useState(initialPendaftar.nama_lengkap || '');
   const [editNik, setEditNik] = useState(initialPendaftar.nik || '');
+  const [editJenisKelamin, setEditJenisKelamin] = useState(initialPendaftar.jenis_kelamin || 'Perempuan');
   const [editTempatLahir, setEditTempatLahir] = useState(initialPendaftar.tempat_lahir || '');
   const [editTanggalLahir, setEditTanggalLahir] = useState(
     initialPendaftar.tanggal_lahir ? String(initialPendaftar.tanggal_lahir).split('T')[0] : ''
@@ -33,7 +51,23 @@ export default function AdminPendaftarDetail({
   const [editJenjangPendidikan, setEditJenjangPendidikan] = useState(initialPendaftar.jenjang_pendidikan || '');
   const [editAsalSekolah, setEditAsalSekolah] = useState(initialPendaftar.asal_sekolah || '');
   const [editTahunLulus, setEditTahunLulus] = useState(initialPendaftar.tahun_lulus ? String(initialPendaftar.tahun_lulus) : '');
-  const [editAlamat, setEditAlamat] = useState(initialPendaftar.alamat || '');
+
+  const parsedInitAlamat = parseAlamat(initialPendaftar.alamat || '');
+  const [editProvinsi, setEditProvinsi] = useState(
+    initialPendaftar.provinsi || parsedInitAlamat.provinsi || ''
+  );
+  const [editKabupatenKota, setEditKabupatenKota] = useState(
+    initialPendaftar.kabupaten_kota || parsedInitAlamat.kabupaten_kota || ''
+  );
+  const [editKecamatan, setEditKecamatan] = useState(
+    initialPendaftar.kecamatan || parsedInitAlamat.kecamatan || ''
+  );
+  const [editDesaKelurahan, setEditDesaKelurahan] = useState(
+    initialPendaftar.desa_kelurahan || parsedInitAlamat.desa_kelurahan || ''
+  );
+  const [editAlamat, setEditAlamat] = useState(
+    parsedInitAlamat.detail_alamat || initialPendaftar.alamat || ''
+  );
   const [editMotivasi, setEditMotivasi] = useState(initialPendaftar.motivasi || '');
 
   // Form State Verifikasi & Fisik
@@ -45,10 +79,16 @@ export default function AdminPendaftarDetail({
   const [tempatList, setTempatList] = useState<TempatPelatihan[]>([]);
   const [angkatanId, setAngkatanId] = useState<string>(initialPendaftar.angkatan_id || '');
   const [tempatPelatihan, setTempatPelatihan] = useState<string>(initialPendaftar.tempat_pelatihan || '');
+  const [angkatanHint, setAngkatanHint] = useState<string>('');
 
   const [selectedBerkas, setSelectedBerkas] = useState<string[]>(
     Array.isArray(initialPendaftar.berkas_verifikasi) ? initialPendaftar.berkas_verifikasi : []
   );
+  const [catatanValidasi, setCatatanValidasi] = useState(initialPendaftar.catatan_validasi || '');
+  const [catatanVerifikasi, setCatatanVerifikasi] = useState(initialPendaftar.catatan_verifikasi || '');
+
+  const statusValidasi = getStatusValidasi(currentPendaftar);
+  const statusVerifikasi = getStatusVerifikasi(currentPendaftar);
 
   const [loading, setLoading] = useState(false);
   const [notification, setNotification] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
@@ -60,14 +100,70 @@ export default function AdminPendaftarDetail({
       setAngkatanList(aData);
       setTempatList(tData);
 
-      if (!angkatanId && aData.length > 0) {
-        setAngkatanId(aData[0].id);
+      // Angkatan default: cocokkan program + rentang waktu pendaftaran
+      // mencakup tanggal daftar (bukan asal ambil index pertama).
+      if (!initialPendaftar.angkatan_id && aData.length > 0) {
+        const picked = pickDefaultAngkatan(aData, initialPendaftar);
+        if (picked.angkatan) {
+          setAngkatanId(picked.angkatan.id);
+          setAngkatanHint(picked.reason);
+        }
+      } else if (initialPendaftar.angkatan_id) {
+        setAngkatanHint('Sudah ditetapkan sebelumnya, masih bisa diubah.');
       }
-      if (!tempatPelatihan && tData.length > 0) {
-        setTempatPelatihan(`${tData[0].nama_tempat} (${tData[0].alamat_lengkap})`);
+      // Tempat default: prioritaskan input peserta, fallback tempat pertama.
+      if (!initialPendaftar.tempat_pelatihan && tData.length > 0) {
+        setTempatPelatihan(tempatLabel(tData[0]));
       }
     }).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    setCurrentPendaftar(initialPendaftar);
+    const parsed = parseAlamat(initialPendaftar.alamat || '');
+    setEditNama(initialPendaftar.nama_lengkap || '');
+    setEditNik(initialPendaftar.nik || '');
+    setEditJenisKelamin(initialPendaftar.jenis_kelamin || 'Perempuan');
+    setEditTempatLahir(initialPendaftar.tempat_lahir || '');
+    setEditTanggalLahir(
+      initialPendaftar.tanggal_lahir ? String(initialPendaftar.tanggal_lahir).split('T')[0] : ''
+    );
+    setEditNoHp(initialPendaftar.no_hp || '');
+    setEditEmail(initialPendaftar.email || '');
+    setEditJenjangPendidikan(initialPendaftar.jenjang_pendidikan || '');
+    setEditAsalSekolah(initialPendaftar.asal_sekolah || '');
+    setEditTahunLulus(initialPendaftar.tahun_lulus ? String(initialPendaftar.tahun_lulus) : '');
+    setEditProvinsi(initialPendaftar.provinsi || parsed.provinsi || '');
+    setEditKabupatenKota(initialPendaftar.kabupaten_kota || parsed.kabupaten_kota || '');
+    setEditKecamatan(initialPendaftar.kecamatan || parsed.kecamatan || '');
+    setEditDesaKelurahan(initialPendaftar.desa_kelurahan || parsed.desa_kelurahan || '');
+    setEditAlamat(parsed.detail_alamat || initialPendaftar.alamat || '');
+    setEditMotivasi(initialPendaftar.motivasi || '');
+    setTinggiBadan(initialPendaftar.tinggi_badan || '');
+    setBeratBadan(initialPendaftar.berat_badan || '');
+    setLingkarPinggang(initialPendaftar.lingkar_pinggang || '');
+    if (initialPendaftar.angkatan_id) {
+      setAngkatanId(initialPendaftar.angkatan_id);
+      setAngkatanHint('Sudah ditetapkan sebelumnya, masih bisa diubah.');
+    } else if (angkatanList.length > 0) {
+      const picked = pickDefaultAngkatan(angkatanList, initialPendaftar);
+      if (picked.angkatan) {
+        setAngkatanId(picked.angkatan.id);
+        setAngkatanHint(picked.reason);
+      }
+    }
+    if (initialPendaftar.tempat_pelatihan) {
+      setTempatPelatihan(initialPendaftar.tempat_pelatihan);
+    } else {
+      setTempatPelatihan((prev) => prev || resolveDefaultTempat(tempatList, null));
+    }
+    if (Array.isArray(initialPendaftar.berkas_verifikasi)) {
+      setSelectedBerkas(initialPendaftar.berkas_verifikasi);
+    }
+    setCatatanValidasi(initialPendaftar.catatan_validasi || '');
+    setCatatanVerifikasi(initialPendaftar.catatan_verifikasi || '');
+  }, [initialPendaftar]);
 
   const tinggiM = Number(tinggiBadan) / 100;
   const bmiValue = tinggiM > 0 && Number(beratBadan) > 0 
@@ -104,9 +200,18 @@ export default function AdminPendaftarDetail({
     setSavingDataDiri(true);
 
     try {
+      const finalAlamat = composeAlamat({
+        provinsi: editProvinsi,
+        kabupaten_kota: editKabupatenKota,
+        kecamatan: editKecamatan,
+        desa_kelurahan: editDesaKelurahan,
+        detail_alamat: editAlamat,
+      }) || editAlamat;
+
       const res = await pendaftarApi.update(currentPendaftar.id, {
         nama_lengkap: editNama,
         nik: editNik,
+        jenis_kelamin: editJenisKelamin,
         tempat_lahir: editTempatLahir,
         tanggal_lahir: editTanggalLahir,
         no_hp: editNoHp,
@@ -114,16 +219,26 @@ export default function AdminPendaftarDetail({
         jenjang_pendidikan: editJenjangPendidikan || undefined,
         asal_sekolah: editAsalSekolah || undefined,
         tahun_lulus: editTahunLulus ? Number(editTahunLulus) : undefined,
-        alamat: editAlamat,
+        alamat: finalAlamat,
+        provinsi: editProvinsi || undefined,
+        kabupaten_kota: editKabupatenKota || undefined,
+        kecamatan: editKecamatan || undefined,
+        desa_kelurahan: editDesaKelurahan || undefined,
         motivasi: editMotivasi,
       });
 
       if (res.success && res.data) {
         setCurrentPendaftar(res.data);
+        const updatedParsed = parseAlamat(res.data.alamat || '');
+        setEditProvinsi(res.data.provinsi || updatedParsed.provinsi || '');
+        setEditKabupatenKota(res.data.kabupaten_kota || updatedParsed.kabupaten_kota || '');
+        setEditKecamatan(res.data.kecamatan || updatedParsed.kecamatan || '');
+        setEditDesaKelurahan(res.data.desa_kelurahan || updatedParsed.desa_kelurahan || '');
+        setEditAlamat(updatedParsed.detail_alamat || res.data.alamat || '');
         setIsEditingDataDiri(false);
         setNotification({
           type: 'success',
-          message: 'Data diri peserta berhasil diperbarui!',
+          message: 'Data diri dan alamat peserta berhasil diperbarui!',
         });
         onStatusChange();
       } else {
@@ -136,9 +251,46 @@ export default function AdminPendaftarDetail({
     }
   };
 
-  // Submit Handler Verifikasi & Terima Peserta
+  // TAHAP 1: Validasi awal (filter laki-laki & keaslian data)
+  const handleValidasi = async (status: 'diterima' | 'ditolak') => {
+    setNotification(null);
+    if (status === 'ditolak' && !catatanValidasi.trim()) {
+      setNotification({ type: 'error', message: 'Alasan penolakan wajib diisi pada tahap validasi.' });
+      return;
+    }
+    try {
+      setLoading(true);
+      const res = await pendaftarApi.validasi(currentPendaftar.id, status, {
+        catatan_validasi: catatanValidasi || undefined,
+        jenis_kelamin: editJenisKelamin as any,
+      });
+      if (res.success && res.data) {
+        setCurrentPendaftar(res.data);
+        setNotification({
+          type: 'success',
+          message: status === 'diterima'
+            ? 'Validasi diterima. Pendaftar masuk ke tahap verifikasi.'
+            : 'Pendaftar ditolak pada tahap validasi.',
+        });
+        onStatusChange();
+      } else {
+        setNotification({ type: 'error', message: res.error || 'Gagal menyimpan validasi.' });
+      }
+    } catch (err: any) {
+      setNotification({ type: 'error', message: err.message || 'Terjadi kesalahan sistem.' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // TAHAP 2: Verifikasi berkas & fisik (seperti alur lama) + masuk angkatan/jadwal
   const handleVerifikasiDanTerima = async () => {
     setNotification(null);
+
+    if (statusValidasi !== 'diterima') {
+      setNotification({ type: 'error', message: 'Selesaikan Tahap 1 Validasi dulu sebelum verifikasi.' });
+      return;
+    }
 
     const missingRequired = LIST_BERKAS_PERSYARATAN.filter(
       (b) => b.required && !selectedBerkas.includes(b.id)
@@ -152,22 +304,28 @@ export default function AdminPendaftarDetail({
       return;
     }
 
+    if (!angkatanId) {
+      setNotification({ type: 'error', message: 'Angkatan wajib dipilih saat menerima peserta.' });
+      return;
+    }
+
     try {
       setLoading(true);
-      const res = await pendaftarApi.updateStatus(currentPendaftar.id, 'diterima', {
+      const res = await pendaftarApi.verifikasi(currentPendaftar.id, 'diterima', {
         tinggi_badan: tinggiBadan,
         berat_badan: beratBadan,
         lingkar_pinggang: lingkarPinggang,
         berkas_verifikasi: selectedBerkas,
         angkatan_id: angkatanId,
         tempat_pelatihan: tempatPelatihan,
+        catatan_verifikasi: catatanVerifikasi || undefined,
       });
 
       if (res.success && res.data) {
         setCurrentPendaftar(res.data);
         setNotification({
           type: 'success',
-          message: 'Peserta berhasil diverifikasi, diterima, dan otomatis terhubung ke jadwal angkatan!',
+          message: 'Verifikasi diterima. Peserta masuk angkatan & jadwal, status menjadi diterima!',
         });
         onStatusChange();
       } else {
@@ -180,14 +338,23 @@ export default function AdminPendaftarDetail({
     }
   };
 
-  const handleReject = async () => {
+  const handleVerifikasiTolak = async () => {
+    setNotification(null);
+    if (!catatanVerifikasi.trim()) {
+      setNotification({ type: 'error', message: 'Alasan penolakan wajib diisi pada tahap verifikasi.' });
+      return;
+    }
     try {
       setLoading(true);
-      const res = await pendaftarApi.updateStatus(currentPendaftar.id, 'ditolak');
+      const res = await pendaftarApi.verifikasi(currentPendaftar.id, 'ditolak', {
+        catatan_verifikasi: catatanVerifikasi,
+      });
       if (res.success && res.data) {
         setCurrentPendaftar(res.data);
-        setNotification({ type: 'success', message: 'Status pendaftaran peserta diubah menjadi Ditolak.' });
+        setNotification({ type: 'success', message: 'Pendaftar ditolak pada tahap verifikasi.' });
         onStatusChange();
+      } else {
+        setNotification({ type: 'error', message: res.error || 'Gagal menolak.' });
       }
     } catch (err: any) {
       setNotification({ type: 'error', message: err.message || 'Gagal menolak pendaftaran.' });
@@ -196,12 +363,24 @@ export default function AdminPendaftarDetail({
     }
   };
 
+  const handleReject = async () => {
+    // Tolak pada tahap berjalan: validasi dulu, verifikasi bila sudah lolos validasi.
+    if (statusValidasi !== 'diterima') return handleValidasi('ditolak');
+    return handleVerifikasiTolak();
+  };
+
   const totalBiaya = currentPendaftar.program?.harga || currentPendaftar.biaya_pelatihan || 0;
+
+  const currentParsed = parseAlamat(currentPendaftar.alamat || '');
+  const currentProvinsi = currentPendaftar.provinsi || currentParsed.provinsi || '-';
+  const currentKota = currentPendaftar.kabupaten_kota || currentParsed.kabupaten_kota || '-';
+  const currentKecamatan = currentPendaftar.kecamatan || currentParsed.kecamatan || '-';
+  const currentKelurahan = currentPendaftar.desa_kelurahan || currentParsed.desa_kelurahan || '-';
 
   return (
     <div className="space-y-6 animate-fade-in">
       {/* Navigasi Header Top */}
-      <div className="flex items-center justify-between gap-4">
+      <div className="flex items-center justify-between gap-4 flex-wrap">
         <button
           type="button"
           onClick={onClose}
@@ -211,8 +390,12 @@ export default function AdminPendaftarDetail({
             <line x1="19" y1="12" x2="5" y2="12" />
             <polyline points="12 19 5 12 12 5" />
           </svg>
-          <span>Kembali ke Daftar Peserta</span>
+          <span>{backLabel}</span>
         </button>
+
+        <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-500">
+          {MODE_TITLE[mode]}
+        </span>
 
         <button
           type="button"
@@ -250,6 +433,9 @@ export default function AdminPendaftarDetail({
               </span>
               <span className={getStatusBadgeClass(currentPendaftar.status)}>
                 {getStatusLabel(currentPendaftar.status)}
+              </span>
+              <span className={getTahapBadgeClass(currentPendaftar)}>
+                {getTahapLabel(currentPendaftar)}
               </span>
             </div>
 
@@ -314,6 +500,18 @@ export default function AdminPendaftarDetail({
                       className="form-input w-full font-mono font-semibold"
                       required
                     />
+                  </div>
+
+                  <div>
+                    <label className="form-label block font-bold text-slate-700 mb-1">Jenis Kelamin *</label>
+                    <select
+                      value={editJenisKelamin}
+                      onChange={(e) => setEditJenisKelamin(e.target.value)}
+                      className="form-input w-full font-semibold"
+                    >
+                      <option value="Perempuan">Perempuan</option>
+                      <option value="Laki-laki">Laki-laki</option>
+                    </select>
                   </div>
 
                   <div className="grid grid-cols-2 gap-2">
@@ -401,14 +599,27 @@ export default function AdminPendaftarDetail({
                     />
                   </div>
 
-                  <div>
-                    <label className="form-label block font-bold text-slate-700 mb-1">Alamat Lengkap *</label>
-                    <textarea
-                      value={editAlamat}
-                      onChange={(e) => setEditAlamat(e.target.value)}
-                      className="form-input w-full text-xs"
-                      rows={3}
-                      required
+                  <div className="border-t border-slate-200/80 pt-3 space-y-2">
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-slate-700 block">
+                      Data Wilayah & Alamat Peserta
+                    </span>
+
+                    <AlamatForm
+                      data={{
+                        provinsi: editProvinsi,
+                        kabupaten_kota: editKabupatenKota,
+                        kecamatan: editKecamatan,
+                        desa_kelurahan: editDesaKelurahan,
+                        detail_alamat: editAlamat,
+                      }}
+                      onChange={(field, val) => {
+                        if (field === 'provinsi') setEditProvinsi(val);
+                        else if (field === 'kabupaten_kota') setEditKabupatenKota(val);
+                        else if (field === 'kecamatan') setEditKecamatan(val);
+                        else if (field === 'desa_kelurahan') setEditDesaKelurahan(val);
+                        else if (field === 'detail_alamat') setEditAlamat(val);
+                      }}
+                      required={false}
                     />
                   </div>
 
@@ -458,6 +669,14 @@ export default function AdminPendaftarDetail({
                     </div>
 
                     <div>
+                      <span className="text-slate-400 block text-[10px] font-bold">JENIS KELAMIN</span>
+                      <span className={`font-bold ${currentPendaftar.jenis_kelamin === 'Laki-laki' ? 'text-rose-600' : 'text-slate-800'}`}>
+                        {currentPendaftar.jenis_kelamin || '-'}
+                        {currentPendaftar.jenis_kelamin === 'Laki-laki' ? ' (tidak memenuhi syarat)' : ''}
+                      </span>
+                    </div>
+
+                    <div>
                       <span className="text-slate-400 block text-[10px] font-bold">TEMPAT & TANGGAL LAHIR</span>
                       <span className="font-medium text-slate-800">
                         {currentPendaftar.tempat_lahir}, {currentPendaftar.tanggal_lahir ? new Date(currentPendaftar.tanggal_lahir).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' }) : '-'}
@@ -489,9 +708,47 @@ export default function AdminPendaftarDetail({
                       <span className="font-medium text-slate-800">{currentPendaftar.tahun_lulus || '-'}</span>
                     </div>
 
-                    <div>
-                      <span className="text-slate-400 block text-[10px] font-bold">ALAMAT LENGKAP</span>
-                      <span className="font-medium text-slate-800 leading-relaxed block">{currentPendaftar.alamat}</span>
+                    <div className="border-t border-slate-100 pt-3 space-y-2.5">
+                      <span className="text-slate-400 block text-[10px] font-bold uppercase tracking-wider">
+                        DATA WILAYAH & ALAMAT
+                      </span>
+
+                      <div className="grid grid-cols-2 gap-2 text-xs">
+                        <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200/80">
+                          <span className="text-[10px] font-bold text-slate-400 block uppercase">Provinsi</span>
+                          <span className="font-bold text-slate-800 text-xs block truncate" title={currentProvinsi}>
+                            {currentProvinsi}
+                          </span>
+                        </div>
+
+                        <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200/80">
+                          <span className="text-[10px] font-bold text-slate-400 block uppercase">Kabupaten / Kota</span>
+                          <span className="font-bold text-slate-800 text-xs block truncate" title={currentKota}>
+                            {currentKota}
+                          </span>
+                        </div>
+
+                        <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200/80">
+                          <span className="text-[10px] font-bold text-slate-400 block uppercase">Kecamatan</span>
+                          <span className="font-bold text-slate-800 text-xs block truncate" title={currentKecamatan}>
+                            {currentKecamatan}
+                          </span>
+                        </div>
+
+                        <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200/80">
+                          <span className="text-[10px] font-bold text-slate-400 block uppercase">Kelurahan / Desa</span>
+                          <span className="font-bold text-slate-800 text-xs block truncate" title={currentKelurahan}>
+                            {currentKelurahan}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="bg-indigo-50/50 p-3 rounded-xl border border-indigo-100/80 space-y-1">
+                        <span className="text-[10px] font-bold text-indigo-800 block uppercase">Alamat Lengkap</span>
+                        <span className="font-medium text-slate-800 text-xs leading-relaxed block">
+                          {currentPendaftar.alamat || '-'}
+                        </span>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -499,16 +756,106 @@ export default function AdminPendaftarDetail({
             </div>
           </Section>
 
+          {mode !== 'validasi' && (
           <Section title="Motivasi Peserta">
             <div className="text-xs text-slate-700 bg-white rounded-2xl p-4 border border-slate-200 leading-relaxed shadow-2xs">
               {currentPendaftar.motivasi || 'Pendaftaran dilakukan via portal LPK.'}
             </div>
           </Section>
+          )}
+          {mode === 'semua' && currentPendaftar.catatan_validasi && (
+            <Section title="Catatan Validasi">
+              <div className="text-xs text-slate-700 bg-amber-50/60 rounded-2xl p-4 border border-amber-200/70 leading-relaxed">
+                {currentPendaftar.catatan_validasi}
+              </div>
+            </Section>
+          )}
+          {mode === 'semua' && currentPendaftar.catatan_verifikasi && (
+            <Section title="Catatan Verifikasi">
+              <div className="text-xs text-slate-700 bg-indigo-50/60 rounded-2xl p-4 border border-indigo-200/70 leading-relaxed">
+                {currentPendaftar.catatan_verifikasi}
+              </div>
+            </Section>
+          )}
         </div>
 
-        {/* Right Column: Verifikasi, Angkatan, Tempat, Fisik & Berkas */}
+        {/* Right Column: Tahap 1 Validasi, Tahap 2 Verifikasi, Angkatan, Fisik & Berkas */}
         <div className="lg:col-span-2 space-y-6">
-          {/* Section 2: Alokasi Angkatan & Tempat Pelatihan */}
+          {/* Alur 2 tahap */}
+          <div className="p-4 rounded-2xl bg-white border border-slate-200 flex items-center gap-2 text-[11px] font-bold flex-wrap">
+            <span className={`px-2.5 py-1 rounded-full border ${statusValidasi === 'diterima' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : statusValidasi === 'ditolak' ? 'bg-rose-50 text-rose-700 border-rose-200' : 'bg-amber-50 text-amber-700 border-amber-200'}`}>
+              1. Validasi: {statusValidasi === 'diterima' ? 'Lolos' : statusValidasi === 'ditolak' ? 'Ditolak' : 'Menunggu'}
+            </span>
+            <span className="text-slate-300">→</span>
+            <span className={`px-2.5 py-1 rounded-full border ${statusVerifikasi === 'diterima' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : statusVerifikasi === 'ditolak' ? 'bg-rose-50 text-rose-700 border-rose-200' : 'bg-slate-50 text-slate-600 border-slate-200'}`}>
+              2. Verifikasi: {statusVerifikasi === 'diterima' ? 'Diterima' : statusVerifikasi === 'ditolak' ? 'Ditolak' : statusVerifikasi === 'menunggu' ? 'Menunggu' : 'Belum proses'}
+            </span>
+            <span className="text-slate-300">→</span>
+            <span className={`px-2.5 py-1 rounded-full border ${currentPendaftar.status === 'diterima' || currentPendaftar.status === 'lulus' ? 'bg-emerald-600 text-white border-emerald-600' : currentPendaftar.status === 'ditolak' || currentPendaftar.status === 'keluar' ? 'bg-rose-600 text-white border-rose-600' : currentPendaftar.status === 'sudah_bekerja' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-slate-100 text-slate-600 border-slate-200'}`}>
+              Status akhir: {getStatusLabel(currentPendaftar.status)}
+            </span>
+          </div>
+
+          {/* Tahap 1 — hanya di menu Validasi Awal */}
+          {mode === 'validasi' && (
+          <Section title="1. Validasi Awal (Filter Khusus Perempuan & Keaslian)">
+            <div className="p-5 rounded-2xl bg-amber-50/60 border border-amber-200/70 space-y-3">
+              <p className="text-[11px] text-amber-800 leading-relaxed">
+                Cek jenis kelamin (program khusus <strong>perempuan</strong>) dan pastikan pendaftar benar-benar orang (NIK, HP, email bukan asal isi).
+                Lolos validasi → masuk Tahap 2 Verifikasi. Ditolak → status akhir ditolak.
+              </p>
+              <div>
+                <label className="form-label block text-xs font-bold text-slate-700 mb-1">Catatan Validasi (wajib jika menolak)</label>
+                <textarea
+                  value={catatanValidasi}
+                  onChange={(e) => setCatatanValidasi(e.target.value)}
+                  rows={2}
+                  placeholder="Contoh: Data benar, pendaftar perempuan, lanjut verifikasi."
+                  className="form-input w-full text-xs bg-white"
+                />
+              </div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  type="button"
+                  onClick={() => handleValidasi('ditolak')}
+                  disabled={loading}
+                  className="btn btn-sm font-bold bg-rose-600 hover:bg-rose-700 text-white border-rose-600 disabled:opacity-60"
+                >
+                  Tolak di Validasi
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleValidasi('diterima')}
+                  disabled={loading || currentPendaftar.jenis_kelamin === 'Laki-laki' && editJenisKelamin === 'Laki-laki'}
+                  className="btn btn-sm font-bold bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-600 disabled:opacity-60"
+                >
+                  Terima → ke Verifikasi
+                </button>
+                {currentPendaftar.catatan_validasi && (
+                  <span className="text-[11px] text-slate-500">Catatan tersimpan: {currentPendaftar.catatan_validasi}</span>
+                )}
+              </div>
+            </div>
+          </Section>
+          )}
+
+          {/* Info kelolosan validasi — hanya di menu Verifikasi */}
+          {mode === 'verifikasi' && (
+            <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-900 space-y-1">
+              <div className="font-extrabold">✓ Lolos Tahap 1 Validasi Awal</div>
+              {currentPendaftar.tanggal_validasi && (
+                <div className="font-medium">
+                  Divalidasi pada {new Date(currentPendaftar.tanggal_validasi).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}
+                </div>
+              )}
+              {currentPendaftar.catatan_validasi && (
+                <div className="leading-relaxed">Catatan validasi: {currentPendaftar.catatan_validasi}</div>
+              )}
+            </div>
+          )}
+
+          {/* Alokasi Angkatan & Tempat — hanya di menu Verifikasi */}
+          {mode === 'verifikasi' && (
           <Section title="2. Alokasi Angkatan & Tempat Pelatihan (Koneksi Jadwal)">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-5 rounded-2xl bg-indigo-50/60 border border-indigo-100">
               <div>
@@ -518,7 +865,10 @@ export default function AdminPendaftarDetail({
                 <select
                   className="form-input w-full text-xs font-bold text-indigo-900 bg-white"
                   value={angkatanId}
-                  onChange={(e) => setAngkatanId(e.target.value)}
+                  onChange={(e) => {
+                    setAngkatanId(e.target.value);
+                    setAngkatanHint('Dipilih manual oleh admin.');
+                  }}
                 >
                   {angkatanList.map((a) => (
                     <option key={a.id} value={a.id}>
@@ -526,6 +876,9 @@ export default function AdminPendaftarDetail({
                     </option>
                   ))}
                 </select>
+                {angkatanHint && (
+                  <p className="text-[11px] text-indigo-700/80 italic mt-1.5">{angkatanHint}</p>
+                )}
               </div>
 
               <div>
@@ -537,21 +890,29 @@ export default function AdminPendaftarDetail({
                   value={tempatPelatihan}
                   onChange={(e) => setTempatPelatihan(e.target.value)}
                 >
-                  {tempatList.map((t) => {
-                    const fullLabel = `${t.nama_tempat} (${t.alamat_lengkap})`;
-                    return (
-                      <option key={t.id} value={fullLabel}>
-                        {fullLabel}
-                      </option>
-                    );
-                  })}
+                  {tempatOptions(tempatList, tempatPelatihan).map((label) => (
+                    <option key={label} value={label}>
+                      {label === currentPendaftar.tempat_pelatihan && currentPendaftar.tempat_pelatihan ? `${label} — pilihan peserta` : label}
+                    </option>
+                  ))}
                 </select>
+                {currentPendaftar.tempat_pelatihan ? (
+                  tempatPelatihan === currentPendaftar.tempat_pelatihan ? (
+                    <p className="text-[11px] text-emerald-700 italic mt-1.5">Mengikuti pilihan peserta saat mendaftar, masih bisa diubah.</p>
+                  ) : (
+                    <p className="text-[11px] text-amber-700 italic mt-1.5">Diubah admin dari pilihan peserta: {currentPendaftar.tempat_pelatihan}</p>
+                  )
+                ) : (
+                  <p className="text-[11px] text-slate-500 italic mt-1.5">Peserta tidak memilih tempat saat mendaftar, silakan tentukan.</p>
+                )}
               </div>
             </div>
           </Section>
+          )}
 
-          {/* Section 3: Data Fisik & BMI */}
-          <Section title="3. Pemeriksaan Data Fisik & Ukuran Seragam">
+          {/* Data Fisik — menu Validasi & Verifikasi (input), menu Semua Peserta (tampilan) */}
+          {mode !== 'semua' && (
+          <Section title={mode === 'validasi' ? '2. Data Fisik Peserta' : '3. Pemeriksaan Data Fisik & Ukuran Seragam'}>
             <div className="p-5 rounded-2xl bg-white border border-slate-200 space-y-4">
               <div className="grid grid-cols-3 gap-3">
                 <div>
@@ -609,9 +970,11 @@ export default function AdminPendaftarDetail({
               )}
             </div>
           </Section>
+          )}
 
-          {/* Section 4: Checklist Berkas Persyaratan */}
-          <Section title="4. Checklist Berkas & Dokumen Persyaratan">
+          {/* Berkas & catatan — hanya di menu Verifikasi */}
+          {mode === 'verifikasi' && (
+          <Section title="4. Tahap 2 — Checklist Berkas & Dokumen Persyaratan">
             <div className="p-5 rounded-2xl bg-white border border-slate-200 space-y-3">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-xs text-slate-500">Centang berkas bertanda (<span className="text-rose-500 font-bold">*</span>) WAJIB diserahkan:</span>
@@ -649,11 +1012,147 @@ export default function AdminPendaftarDetail({
               </div>
             </div>
           </Section>
+          )}
 
-          {/* Section 5: Informasi Pembayaran (Jika Sudah Diterima) */}
-          {currentPendaftar.status === 'diterima' && (
+          {/* Section 4b: Catatan verifikasi — hanya di menu Verifikasi */}
+          {mode === 'verifikasi' && (
+          <Section title="4b. Catatan Verifikasi (wajib jika menolak)">
+            <div className="p-5 rounded-2xl bg-white border border-slate-200">
+              <textarea
+                value={catatanVerifikasi}
+                onChange={(e) => setCatatanVerifikasi(e.target.value)}
+                rows={2}
+                placeholder="Contoh: Berkas lengkap, siap masuk angkatan."
+                className="form-input w-full text-xs"
+              />
+              {currentPendaftar.catatan_verifikasi && (
+                <p className="text-[11px] text-slate-500 mt-1">Catatan tersimpan: {currentPendaftar.catatan_verifikasi}</p>
+              )}
+            </div>
+          </Section>
+          )}
+
+          {/* Ringkasan status & penempatan — hanya di menu Semua Peserta */}
+          {mode === 'semua' && (
+          <Section title="Status Akhir, Angkatan & Tempat Pelatihan">
+            <div className="p-5 rounded-2xl bg-white border border-slate-200 space-y-3 text-xs">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <span className="text-slate-500 font-bold">Status Akhir (bisa diubah)</span>
+                <select
+                  value={currentPendaftar.status}
+                  disabled={loading}
+                  onChange={async (e) => {
+                    const next = e.target.value as Pendaftar['status'];
+                    if (next === currentPendaftar.status) return;
+                    const label = STATUS_AKHIR_OPTIONS.find((o) => o.value === next)?.label || next;
+                    if (!window.confirm(`Ubah status akhir ${currentPendaftar.nama_lengkap} menjadi "${label}"?`)) return;
+                    setNotification(null);
+                    setLoading(true);
+                    try {
+                      const res = await pendaftarApi.updateStatusAkhir(currentPendaftar.id, next);
+                      if (res.success && res.data) {
+                        setCurrentPendaftar(res.data);
+                        setNotification({ type: 'success', message: res.message || `Status akhir diubah menjadi ${label}.` });
+                        onStatusChange();
+                      } else {
+                        setNotification({ type: 'error', message: res.error || 'Gagal mengubah status akhir.' });
+                      }
+                    } catch (err: any) {
+                      setNotification({ type: 'error', message: err.message || 'Terjadi kesalahan sistem.' });
+                    } finally {
+                      setLoading(false);
+                    }
+                  }}
+                  className="form-input text-xs font-bold text-indigo-900 bg-indigo-50/60 border-indigo-200 disabled:opacity-60"
+                >
+                  {STATUS_AKHIR_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <span className="text-slate-500 font-bold">Tahap</span>
+                <span className={getTahapBadgeClass(currentPendaftar)}>{getTahapLabel(currentPendaftar)}</span>
+              </div>
+              {currentPendaftar.status === 'lulus' && (
+                <p className="text-[11px] text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg p-2.5 leading-relaxed">
+                  Status Lulus terisi otomatis saat peserta dinyatakan lulus di menu Kelulusan & Sertifikat. Masih bisa diubah manual bila keliru.
+                </p>
+              )}
+              {currentPendaftar.status === 'keluar' && (
+                <p className="text-[11px] text-slate-600 bg-slate-50 border border-slate-200 rounded-lg p-2.5 leading-relaxed">
+                  Peserta tercatat keluar / tidak melanjutkan pelatihan: jadwal sesi dilepas dan menu peserta dikunci.
+                </p>
+              )}
+              <div className="border-t border-slate-100 pt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <span className="text-slate-400 block text-[10px] font-bold uppercase">Angkatan</span>
+                  <span className="font-bold text-slate-800">
+                    {currentPendaftar.angkatan?.nama_angkatan || (currentPendaftar.angkatan_id ? 'Sudah ditetapkan' : 'Belum masuk angkatan')}
+                  </span>
+                  {currentPendaftar.angkatan && (
+                    <span className="block text-[11px] text-slate-500 font-medium">
+                      {currentPendaftar.angkatan.kode_angkatan} • Tahun {currentPendaftar.angkatan.tahun} • {currentPendaftar.angkatan.status}
+                    </span>
+                  )}
+                </div>
+                <div>
+                  <span className="text-slate-400 block text-[10px] font-bold uppercase">Tempat Pelatihan</span>
+                  <span className="font-bold text-slate-800">{currentPendaftar.tempat_pelatihan || 'Belum ditentukan'}</span>
+                </div>
+              </div>
+            </div>
+          </Section>
+          )}
+
+          {/* Data fisik (tampilan) — hanya di menu Semua Peserta */}
+          {mode === 'semua' && (
+          <Section title="Data Fisik Peserta">
+            <div className="p-5 rounded-2xl bg-white border border-slate-200 space-y-3 text-xs">
+              <div className="grid grid-cols-3 gap-3">
+                <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200/80">
+                  <span className="text-[10px] font-bold text-slate-400 block uppercase">Tinggi</span>
+                  <span className="font-bold text-slate-800">{currentPendaftar.tinggi_badan ? `${currentPendaftar.tinggi_badan} cm` : '-'}</span>
+                </div>
+                <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200/80">
+                  <span className="text-[10px] font-bold text-slate-400 block uppercase">Berat</span>
+                  <span className="font-bold text-slate-800">{currentPendaftar.berat_badan ? `${currentPendaftar.berat_badan} kg` : '-'}</span>
+                </div>
+                <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200/80">
+                  <span className="text-[10px] font-bold text-slate-400 block uppercase">Lingkar Pinggang</span>
+                  <span className="font-bold text-slate-800">{currentPendaftar.lingkar_pinggang ? `${currentPendaftar.lingkar_pinggang} cm` : '-'}</span>
+                </div>
+              </div>
+              {bmiValue && (
+                <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between">
+                  <div className="text-xs text-slate-600 font-medium">
+                    BMI: <span className="font-bold text-slate-900">{bmiValue} kg/m²</span>
+                  </div>
+                  {(() => {
+                    const cat = getBmiCategory(Number(bmiValue));
+                    return (
+                      <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border ${cat.color}`}>
+                        {cat.label}
+                      </span>
+                    );
+                  })()}
+                </div>
+              )}
+              <div>
+                <span className="text-slate-400 block text-[10px] font-bold uppercase">Riwayat Penyakit</span>
+                <span className="font-medium text-slate-800">{currentPendaftar.riwayat_penyakit || 'Tidak ada'}</span>
+              </div>
+            </div>
+          </Section>
+          )}
+
+          {/* Section 5: Informasi Pembayaran (Jika Sudah Diterima; tidak di menu Validasi) */}
+          {mode !== 'validasi' && currentPendaftar.status === 'diterima' && (
             <Section title="5. Status Pembayaran Pelatihan">
               <div className="p-5 rounded-2xl bg-white border border-slate-200 space-y-3">
+                {(currentPendaftar.status_pembayaran || 'belum_bayar') !== 'lunas' && (
+                  <TenggatBanner pendaftarId={currentPendaftar.id} />
+                )}
                 <div className="flex justify-between items-center text-xs">
                   <span className="text-slate-500 font-bold">Status Bayar:</span>
                   <span className="font-bold text-indigo-700 uppercase">{currentPendaftar.status_pembayaran || 'Belum Bayar'}</span>
@@ -682,28 +1181,32 @@ export default function AdminPendaftarDetail({
             </Section>
           )}
 
-          {/* Action Buttons Panel */}
-          <div className="pt-4 border-t border-slate-200 flex items-center justify-end gap-3">
+          {/* Action Buttons Panel — hanya di menu Verifikasi */}
+          {mode === 'verifikasi' && (
+          <div className="pt-4 border-t border-slate-200 flex items-center justify-end gap-3 flex-wrap">
             <button
               type="button"
-              onClick={handleReject}
-              disabled={loading}
-              className="btn btn-danger btn-sm font-bold"
+              onClick={handleVerifikasiTolak}
+              disabled={loading || statusValidasi !== 'diterima'}
+              title={statusValidasi !== 'diterima' ? 'Selesaikan validasi dulu' : 'Tolak di tahap verifikasi'}
+              className="btn btn-danger btn-sm font-bold disabled:opacity-60"
             >
-              Tolak Pendaftaran
+              Tolak di Verifikasi
             </button>
             <button
               type="button"
               onClick={handleVerifikasiDanTerima}
-              disabled={loading}
+              disabled={loading || statusValidasi !== 'diterima'}
+              title={statusValidasi !== 'diterima' ? 'Selesaikan validasi dulu' : 'Terima + masuk angkatan & jadwal'}
               className="btn btn-accent btn-sm bg-indigo-600 hover:bg-indigo-700 text-white border-indigo-600 font-bold px-6 py-2.5 text-xs shadow-md flex items-center gap-1.5 disabled:opacity-75 disabled:cursor-not-allowed"
             >
               {loading && (
                 <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
               )}
-              {loading ? 'Memproses Verifikasi...' : 'Verifikasi & Terima Peserta (Masuk Jadwal)'}
+              {loading ? 'Memproses Verifikasi...' : 'Verifikasi & Terima (Masuk Angkatan + Jadwal)'}
             </button>
           </div>
+          )}
         </div>
       </div>
     </div>

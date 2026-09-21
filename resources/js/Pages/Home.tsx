@@ -492,8 +492,8 @@ export default function Home({ programs = [] }: HomeProps) {
                 },
                 {
                   num: '04',
-                  title: 'Skema Cicilan Fleksibel',
-                  desc: 'Kemudahan pendaftaran dengan pembayaran bertahap dan pemantauan transaksi transparan melalui portal peserta.',
+                  title: 'Pembayaran Bertahap Fleksibel',
+                  desc: 'Kemudahan pendaftaran dengan pembayaran bertahap sesuai kemampuan dan pemantauan transaksi transparan melalui portal peserta.',
                   offset: 130,
                 },
               ].map((item, idx) => (
@@ -547,8 +547,8 @@ export default function Home({ programs = [] }: HomeProps) {
                 },
                 {
                   step: '3',
-                  title: 'Pembayaran / Cicilan',
-                  desc: 'Pilih pembayaran transfer penuh atau skema cicilan resmi dengan upload bukti instan.',
+                  title: 'Pembayaran Bertahap',
+                  desc: 'Bayar penuh sekaligus atau bertahap dengan upload bukti instan, maksimal 11 hari dari hari pertama pelatihan.',
                   offset: 100,
                 },
                 {

@@ -11,9 +11,34 @@ interface PesertaUjianPageProps {
   initialPendaftar?: Pendaftar | null;
 }
 
+function shuffleArray<T>(arr: T[]): T[] {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+// Acak urutan soal + acak urutan abjad jawaban (opsi) per soal.
+// opsiMaps[soalId][shuffledIdx] = originalIdx — dipakai untuk konversi jawaban saat submit.
+function randomizeSoalForPeserta(list: SoalUjian[]): { soalList: SoalUjian[]; opsiMaps: Record<string, number[]> } {
+  const opsiMaps: Record<string, number[]> = {};
+  const randomized = list.map((soal) => {
+    const originalCount = soal.opsi.length;
+    const shuffledIdxToOriginal = shuffleArray(Array.from({ length: originalCount }, (_, i) => i));
+    const newOpsi = shuffledIdxToOriginal.map((origIdx) => soal.opsi[origIdx]);
+    const newJawaban = shuffledIdxToOriginal.indexOf(soal.jawaban_benar);
+    opsiMaps[soal.id] = shuffledIdxToOriginal;
+    return { ...soal, opsi: newOpsi, jawaban_benar: newJawaban };
+  });
+  return { soalList: shuffleArray(randomized), opsiMaps };
+}
+
 export default function PesertaUjianPage({ initialPendaftar }: PesertaUjianPageProps) {
   const [pendaftar, setPendaftar] = useState<Pendaftar | null>(initialPendaftar || null);
   const [soalList, setSoalList] = useState<SoalUjian[]>([]);
+  const [opsiMaps, setOpsiMaps] = useState<Record<string, number[]>>({});
   const [tipe, setTipe] = useState<'pretest' | 'posttest'>('pretest');
   const [step, setStep] = useState<'loading' | 'exam' | 'result' | 'empty' | 'error' | 'max_reached'>('loading');
   const [errorMessage, setErrorMessage] = useState<string>('');
@@ -131,6 +156,7 @@ export default function PesertaUjianPage({ initialPendaftar }: PesertaUjianPageP
               parsed.soalList.length > 0
             ) {
               setSoalList(parsed.soalList);
+              setOpsiMaps(parsed.opsiMaps || {});
               setInitialAnswers(parsed.userAnswers || {});
               setInitialRagu(parsed.raguRagu || {});
               setInitialIdx(parsed.currentIdx || 0);
@@ -155,10 +181,13 @@ export default function PesertaUjianPage({ initialPendaftar }: PesertaUjianPageP
           });
 
           if (resSoal.success && Array.isArray(resSoal.data) && resSoal.data.length > 0) {
-            const questions = resSoal.data;
+            // Backend sudah filter hanya soal aktif + acak urutan soal (inRandomOrder).
+            // Acak lagi di client: urutan soal + urutan abjad jawaban (A/B/C/D) per peserta.
+            const { soalList: questions, opsiMaps: maps } = randomizeSoalForPeserta(resSoal.data);
             const computedEndTime = Date.now() + 15 * 60 * 1000; // 15 menit
 
             setSoalList(questions);
+            setOpsiMaps(maps);
             setInitialAnswers({});
             setInitialRagu({});
             setInitialIdx(0);
@@ -169,6 +198,7 @@ export default function PesertaUjianPage({ initialPendaftar }: PesertaUjianPageP
               key,
               JSON.stringify({
                 soalList: questions,
+                opsiMaps: maps,
                 userAnswers: {},
                 raguRagu: {},
                 currentIdx: 0,
@@ -330,6 +360,7 @@ export default function PesertaUjianPage({ initialPendaftar }: PesertaUjianPageP
         initialIdx={initialIdx}
         endTimeMs={endTimeMs}
         storageKey={storageKey}
+        opsiMaps={opsiMaps}
         onFinish={handleFinishExam}
         onCancel={handleBackToDashboard}
       />

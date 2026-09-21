@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useState } from 'react';
 import type { PendaftarFormData } from '@/lib/storage';
+import AlamatForm from '@/Components/AlamatForm';
 
 interface Step1Props {
   data: PendaftarFormData;
@@ -9,162 +9,7 @@ interface Step1Props {
   errors: Record<string, string>;
 }
 
-interface WilayahItem {
-  id: number | string;
-  name: string;
-}
-
 export default function Step1DataDiri({ data, onChange, errors }: Step1Props) {
-  const [provinsiList, setProvinsiList] = useState<WilayahItem[]>([]);
-  const [kabupatenList, setKabupatenList] = useState<WilayahItem[]>([]);
-  const [kecamatanList, setKecamatanList] = useState<WilayahItem[]>([]);
-  const [kelurahanList, setKelurahanList] = useState<WilayahItem[]>([]);
-
-  const [selectedProvinsiId, setSelectedProvinsiId] = useState('');
-  const [selectedKabupatenId, setSelectedKabupatenId] = useState('');
-  const [selectedKecamatanId, setSelectedKecamatanId] = useState('');
-
-  // 1. Fetch Provinces
-  useEffect(() => {
-    async function fetchProvinsi() {
-      try {
-        const response = await fetch('https://www.emsifa.com/api-wilayah-indonesia/api/provinces.json');
-        if (!response.ok) throw new Error('Gagal mengambil data provinsi');
-        const result = await response.json();
-        setProvinsiList(result || []);
-
-        if (data.provinsi) {
-          const match = (result || []).find((item: WilayahItem) => item.name === data.provinsi);
-          if (match) setSelectedProvinsiId(String(match.id));
-        }
-      } catch (error) {
-        console.error(error);
-        setProvinsiList([]);
-      }
-    }
-
-    fetchProvinsi();
-  }, [data.provinsi]);
-
-  // 2. Fetch Regencies (Kabupaten/Kota)
-  useEffect(() => {
-    if (!selectedProvinsiId) {
-      setKabupatenList([]);
-      setSelectedKabupatenId('');
-      setKecamatanList([]);
-      setSelectedKecamatanId('');
-      setKelurahanList([]);
-      return;
-    }
-
-    async function fetchKabupaten() {
-      try {
-        const response = await fetch(`https://www.emsifa.com/api-wilayah-indonesia/api/regencies/${selectedProvinsiId}.json`);
-        if (!response.ok) throw new Error('Gagal mengambil data kabupaten');
-        const result = await response.json();
-        setKabupatenList(result || []);
-
-        if (data.kabupaten_kota) {
-          const match = (result || []).find((item: WilayahItem) => item.name === data.kabupaten_kota);
-          if (match) setSelectedKabupatenId(String(match.id));
-        }
-      } catch (error) {
-        console.error(error);
-        setKabupatenList([]);
-      }
-    }
-
-    fetchKabupaten();
-  }, [selectedProvinsiId, data.kabupaten_kota]);
-
-  // 3. Fetch Districts (Kecamatan)
-  useEffect(() => {
-    if (!selectedKabupatenId) {
-      setKecamatanList([]);
-      setSelectedKecamatanId('');
-      setKelurahanList([]);
-      return;
-    }
-
-    async function fetchKecamatan() {
-      try {
-        const response = await fetch(`https://www.emsifa.com/api-wilayah-indonesia/api/districts/${selectedKabupatenId}.json`);
-        if (!response.ok) throw new Error('Gagal mengambil data kecamatan');
-        const result = await response.json();
-        setKecamatanList(result || []);
-
-        if (data.kecamatan) {
-          const match = (result || []).find((item: WilayahItem) => item.name === data.kecamatan);
-          if (match) setSelectedKecamatanId(String(match.id));
-        }
-      } catch (error) {
-        console.error(error);
-        setKecamatanList([]);
-      }
-    }
-
-    fetchKecamatan();
-  }, [selectedKabupatenId, data.kecamatan]);
-
-  // 4. Fetch Villages (Desa/Kelurahan)
-  useEffect(() => {
-    if (!selectedKecamatanId) {
-      setKelurahanList([]);
-      return;
-    }
-
-    async function fetchKelurahan() {
-      try {
-        const response = await fetch(`https://www.emsifa.com/api-wilayah-indonesia/api/villages/${selectedKecamatanId}.json`);
-        if (!response.ok) throw new Error('Gagal mengambil data desa/kelurahan');
-        const result = await response.json();
-        setKelurahanList(result || []);
-      } catch (error) {
-        console.error(error);
-        setKelurahanList([]);
-      }
-    }
-
-    fetchKelurahan();
-  }, [selectedKecamatanId]);
-
-  const handleProvinsiChange = (value: string) => {
-    const selected = provinsiList.find((item) => String(item.id) === value);
-    setSelectedProvinsiId(value);
-    setSelectedKabupatenId('');
-    setSelectedKecamatanId('');
-    setKabupatenList([]);
-    setKecamatanList([]);
-    setKelurahanList([]);
-    onChange('provinsi', selected?.name || '');
-    onChange('kabupaten_kota', '');
-    onChange('kecamatan', '');
-    onChange('desa_kelurahan', '');
-  };
-
-  const handleKabupatenChange = (value: string) => {
-    const selected = kabupatenList.find((item) => String(item.id) === value);
-    setSelectedKabupatenId(value);
-    setSelectedKecamatanId('');
-    setKecamatanList([]);
-    setKelurahanList([]);
-    onChange('kabupaten_kota', selected?.name || '');
-    onChange('kecamatan', '');
-    onChange('desa_kelurahan', '');
-  };
-
-  const handleKecamatanChange = (value: string) => {
-    const selected = kecamatanList.find((item) => String(item.id) === value);
-    setSelectedKecamatanId(value);
-    setKelurahanList([]);
-    onChange('kecamatan', selected?.name || '');
-    onChange('desa_kelurahan', '');
-  };
-
-  const handleKelurahanChange = (value: string) => {
-    const selected = kelurahanList.find((item) => String(item.id) === value);
-    onChange('desa_kelurahan', selected?.name || '');
-  };
 
   return (
     <div className="animate-slide-right">
@@ -254,6 +99,29 @@ export default function Step1DataDiri({ data, onChange, errors }: Step1Props) {
             <span className="form-error">{errors.tanggal_lahir}</span>
           )}
         </div>
+
+        {/* Jenis Kelamin — program khusus perempuan, dicek di tahap Validasi */}
+        <div className="form-group">
+          <label className="form-label" htmlFor="jenis_kelamin">
+            Jenis Kelamin <span className="required">*</span>
+          </label>
+          <select
+            id="jenis_kelamin"
+            className={`form-input ${errors.jenis_kelamin ? 'error' : ''}`}
+            value={data.jenis_kelamin || ''}
+            onChange={(e) => onChange('jenis_kelamin', e.target.value)}
+          >
+            <option value="">-- Pilih Jenis Kelamin --</option>
+            <option value="Perempuan">Perempuan</option>
+            <option value="Laki-laki">Laki-laki</option>
+          </select>
+          {errors.jenis_kelamin && (
+            <span className="form-error">{errors.jenis_kelamin}</span>
+          )}
+          <p className="text-[11px] text-[var(--text-tertiary)] mt-1">
+            Program pelatihan ini khusus peserta perempuan. Data ini dicek pada tahap Validasi awal.
+          </p>
+        </div>
         
 
         {/* Alamat */}
@@ -261,112 +129,31 @@ export default function Step1DataDiri({ data, onChange, errors }: Step1Props) {
           <label className="form-label">
             Alamat Lengkap <span className="required">*</span>
           </label>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-5 gap-y-4">
-            <div className="space-y-4">
-              <div className="form-group mb-4">
-                <label className="form-label text-xs" htmlFor="provinsi">
-                  Provinsi <span className="required">*</span>
-                </label>
-                <select
-                  id="provinsi"
-                  className={`form-input ${errors.provinsi ? 'error' : ''}`}
-                  value={selectedProvinsiId}
-                  onChange={(e) => handleProvinsiChange(e.target.value)}
-                >
-                  <option value="">Pilih Provinsi</option>
-                  {provinsiList.map((option) => (
-                    <option key={option.id} value={String(option.id)}>{option.name}</option>
-                  ))}
-                </select>
-                {errors.provinsi && <span className="form-error">{errors.provinsi}</span>}
-              </div>
-
-              <div className="form-group mb-4">
-                <label className="form-label text-xs" htmlFor="kabupaten_kota">
-                  Kabupaten/Kota <span className="required">*</span>
-                </label>
-                <select
-                  id="kabupaten_kota"
-                  className={`form-input ${errors.kabupaten_kota ? 'error' : ''}`}
-                  value={selectedKabupatenId}
-                  onChange={(e) => handleKabupatenChange(e.target.value)}
-                  disabled={!selectedProvinsiId || kabupatenList.length === 0}
-                >
-                  <option value="">Pilih Kabupaten/Kota</option>
-                  {kabupatenList.map((option) => (
-                    <option key={option.id} value={String(option.id)}>{option.name}</option>
-                  ))}
-                </select>
-                {errors.kabupaten_kota && (
-                  <span className="form-error">{errors.kabupaten_kota}</span>
-                )}
-              </div>
-            </div>
-
-            <div className="space-y-4">
-              <div className="form-group mb-4">
-                <label className="form-label text-xs" htmlFor="kecamatan">
-                  Kecamatan <span className="required">*</span>
-                </label>
-                <select
-                  id="kecamatan"
-                  className={`form-input ${errors.kecamatan ? 'error' : ''}`}
-                  value={selectedKecamatanId}
-                  onChange={(e) => handleKecamatanChange(e.target.value)}
-                  disabled={!selectedKabupatenId || kecamatanList.length === 0}
-                >
-                  <option value="">Pilih Kecamatan</option>
-                  {kecamatanList.map((option) => (
-                    <option key={option.id} value={String(option.id)}>{option.name}</option>
-                  ))}
-                </select>
-                {errors.kecamatan && <span className="form-error">{errors.kecamatan}</span>}
-              </div>
-              
-              <div className="form-group mb-4">
-                <label className="form-label text-xs" htmlFor="desa_kelurahan">
-                  Desa/Kelurahan <span className="required">*</span>
-                </label>
-                <select
-                  id="desa_kelurahan"
-                  className={`form-input ${errors.desa_kelurahan ? 'error' : ''}`}
-                  value={
-                    data.desa_kelurahan
-                      ? kelurahanList.find((i) => i.name.toLowerCase() === data.desa_kelurahan?.toLowerCase())?.id
-                        ? String(kelurahanList.find((i) => i.name.toLowerCase() === data.desa_kelurahan?.toLowerCase())?.id)
-                        : ''
-                      : ''
-                  }
-                  onChange={(e) => handleKelurahanChange(e.target.value)}
-                  disabled={!selectedKecamatanId || kelurahanList.length === 0}
-                >
-                  <option value="">Pilih Desa/Kelurahan</option>
-                  {kelurahanList.map((option) => (
-                    <option key={option.id} value={String(option.id)}>{option.name}</option>
-                  ))}
-                </select>
-                {errors.desa_kelurahan && (
-                  <span className="form-error">{errors.desa_kelurahan}</span>
-                )}
-              </div>
-            </div>
-          </div>
-
-          <div className="form-group mt-1">
-            <label className="form-label text-xs" htmlFor="alamat_lengkap">
-              Detail Alamat <span className="required">*</span>
-            </label>
-            <textarea
-              id="alamat_lengkap"
-              rows={4}
-              className={`form-input resize-y ${errors.alamat_lengkap ? 'error' : ''}`}
-              placeholder="Masukkan alamat lengkap, termasuk nama jalan, nomor rumah, RT/RW, dan informasi tambahan lainnya"
-              value={data.alamat_lengkap}
-              onChange={(e) => onChange('alamat_lengkap', e.target.value)}
-            />
-            {errors.alamat_lengkap && <span className="form-error">{errors.alamat_lengkap}</span>}
-          </div>
+          <AlamatForm
+            data={{
+              provinsi: data.provinsi,
+              kabupaten_kota: data.kabupaten_kota,
+              kecamatan: data.kecamatan,
+              desa_kelurahan: data.desa_kelurahan,
+              detail_alamat: data.alamat_lengkap,
+            }}
+            onChange={(field, value) => {
+              if (field === 'detail_alamat') {
+                onChange('alamat_lengkap', value);
+                return;
+              }
+              if (field === 'provinsi' || field === 'kabupaten_kota' || field === 'kecamatan' || field === 'desa_kelurahan') {
+                onChange(field, value);
+              }
+            }}
+            errors={{
+              provinsi: errors.provinsi,
+              kabupaten_kota: errors.kabupaten_kota,
+              kecamatan: errors.kecamatan,
+              desa_kelurahan: errors.desa_kelurahan,
+              detail_alamat: errors.alamat_lengkap,
+            }}
+          />
         </div>
       </div>
     </div>

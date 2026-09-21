@@ -37,10 +37,12 @@ class KelulusanController extends Controller
             $kelulusan = Kelulusan::create($validated);
         }
 
+        $this->syncStatusAkhir($kelulusan->fresh());
+
         return response()->json([
             'success' => true,
             'message' => 'Data kelulusan berhasil disimpan.',
-            'data' => $kelulusan->load(['pendaftar.program', 'pendaftar.angkatan']),
+            'data' => $kelulusan->fresh()->load(['pendaftar.program', 'pendaftar.angkatan']),
         ], 201);
     }
 
@@ -50,21 +52,52 @@ class KelulusanController extends Controller
         $validated = $this->validatePayload($request, true);
         $kelulusan->update($validated);
 
+        $this->syncStatusAkhir($kelulusan->fresh());
+
         return response()->json([
             'success' => true,
             'message' => 'Data kelulusan berhasil diperbarui.',
-            'data' => $kelulusan->load(['pendaftar.program', 'pendaftar.angkatan']),
+            'data' => $kelulusan->fresh()->load(['pendaftar.program', 'pendaftar.angkatan']),
         ]);
     }
 
     public function destroy(string $id)
     {
-        Kelulusan::findOrFail($id)->delete();
+        $kelulusan = Kelulusan::findOrFail($id);
+        $pendaftarId = $kelulusan->pendaftar_id;
+        $wasLulus = $kelulusan->status_kelulusan === 'Lulus';
+        $kelulusan->delete();
+
+        // Reset kelulusan Lulus -> kembalikan peserta ke diterima.
+        if ($wasLulus) {
+            $pendaftar = \App\Models\Pendaftar::find($pendaftarId);
+            if ($pendaftar && $pendaftar->status === 'lulus') {
+                $pendaftar->update(['status' => 'diterima']);
+            }
+        }
 
         return response()->json([
             'success' => true,
             'message' => 'Data kelulusan berhasil dihapus.',
         ]);
+    }
+
+    /**
+     * Sinkron status akhir peserta dari hasil kelulusan:
+     * Lulus -> status 'lulus'; selain itu yang terlanjur 'lulus' kembali 'diterima'.
+     */
+    private function syncStatusAkhir(Kelulusan $kelulusan): void
+    {
+        $pendaftar = \App\Models\Pendaftar::find($kelulusan->pendaftar_id);
+        if (!$pendaftar) return;
+
+        if ($kelulusan->status_kelulusan === 'Lulus') {
+            if ($pendaftar->status !== 'lulus') {
+                $pendaftar->update(['status' => 'lulus']);
+            }
+        } elseif ($pendaftar->status === 'lulus') {
+            $pendaftar->update(['status' => 'diterima']);
+        }
     }
 
     private function validatePayload(Request $request, bool $partial = false): array

@@ -6,6 +6,7 @@ import {
   pendaftarApi,
   jadwalApi,
   tempatApi,
+  instrukturApi,
   mataPelajaranApi,
   nilaiApi,
   absensiApi,
@@ -16,6 +17,7 @@ import type {
   Pendaftar,
   JadwalPelatihan,
   TempatPelatihan,
+  Instruktur,
   JenisSesi,
   MataPelajaran,
   Nilai,
@@ -23,8 +25,24 @@ import type {
   StatusKehadiran,
   Kehadiran,
 } from '@/lib/types';
+import {
+  groupJadwalToKelas,
+  matchesTempat,
+  getSchedulesForKelas,
+  type KelasCard as SchedulePackageCard,
+} from '@/lib/kelas';
+import {
+  tambahHariValid,
+  isTanggalMerah,
+  keteranganTanggalMerah,
+  hitungHariLibur,
+} from '@/lib/hariLibur';
+
+export type JadwalManagerMode = 'penuh' | 'kelas' | 'jadwal' | 'penilaian';
 import AdminPendaftarDetail from '@/Components/AdminPendaftarDetail';
 import DeleteConfirmModal from '@/Components/DeleteConfirmModal';
+import ActionToast, { useActionToast } from '@/Components/ActionToast';
+import InstrukturSearchSelect from '@/Components/InstrukturSearchSelect';
 import Pagination from '@/Components/Pagination';
 
 function nilaiColor(n: number) {
@@ -95,6 +113,9 @@ interface JadwalManagerProps {
   initialPendaftarList?: Pendaftar[];
   initialJadwalList?: JadwalPelatihan[];
   initialTempatList?: TempatPelatihan[];
+  initialInstrukturList?: Instruktur[];
+  /** mode tampilan: penuh (semua) | kelas (daftar kelas → peserta) | jadwal (kelas → sesi 1-10) | penilaian (kelas → nilai) */
+  mode?: JadwalManagerMode;
 }
 
 export default function JadwalManager({
@@ -102,12 +123,33 @@ export default function JadwalManager({
   initialPendaftarList = [],
   initialJadwalList = [],
   initialTempatList = [],
+  initialInstrukturList = [],
+  mode = 'penuh',
 }: JadwalManagerProps) {
+  // Tab detail yang dibuka + tab yang diizinkan sesuai mode
+  const modeDetailTab = mode === 'kelas' ? 'peserta' : mode === 'jadwal' ? 'jadwal' : mode === 'penilaian' ? 'penilaian' : 'peserta';
+  const allowedTabs: Array<'peserta' | 'jadwal' | 'penilaian' | 'cetak'> =
+    mode === 'kelas' ? ['peserta']
+    : mode === 'jadwal' ? ['jadwal', 'cetak']
+    : mode === 'penilaian' ? ['penilaian']
+    : ['peserta', 'jadwal', 'penilaian', 'cetak'];
+  const canManagePackage = mode === 'penuh' || mode === 'jadwal';
+  const modeTitle =
+    mode === 'kelas' ? 'Kelola Kelas' :
+    mode === 'jadwal' ? 'Kelola Jadwal Sesi' :
+    mode === 'penilaian' ? 'Kelola Penilaian' :
+    'Kelola Jadwal & Lokasi Pelatihan';
+  const modeSubtitle =
+    mode === 'kelas' ? 'Daftar kelas (angkatan + tempat). Klik kelas untuk melihat peserta di dalamnya.'
+    : mode === 'jadwal' ? 'Pilih kelas, lalu susun sesi hari 1–10. Klik kelas untuk mengelola sesi.'
+    : mode === 'penilaian' ? 'Pilih kelas untuk mengisi nilai peserta.'
+    : 'Buat Paket Jadwal (Milih Angkatan + Tempat Pelatihan) ➔ Klik Card Kotak untuk Tarik Peserta & Susun Jadwal Hari 1-10';
   // Master data
   const [angkatanList, setAngkatanList] = useState<Angkatan[]>(initialAngkatanList);
   const [pendaftarList, setPendaftarList] = useState<Pendaftar[]>(initialPendaftarList);
   const [jadwalList, setJadwalList] = useState<JadwalPelatihan[]>(initialJadwalList);
   const [tempatList, setTempatList] = useState<TempatPelatihan[]>(initialTempatList);
+  const [instrukturList, setInstrukturList] = useState<Instruktur[]>(initialInstrukturList);
 
   // Filters & Search
   const [filterTempat, setFilterTempat] = useState<string>('semua');
@@ -120,7 +162,11 @@ export default function JadwalManager({
   const [angkatanCandidates, setAngkatanCandidates] = useState<Pendaftar[]>([]);
   const [viewingParticipantDetail, setViewingParticipantDetail] = useState<Pendaftar | null>(null);
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
+  const [isSavingSession, setIsSavingSession] = useState<boolean>(false);
+  const [isDeleting, setIsDeleting] = useState<boolean>(false);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
+  const [packageDeleteTarget, setPackageDeleteTarget] = useState<SchedulePackageCard | null>(null);
+  const { actionToast, showLoading, showSuccess, showError, hideToast } = useActionToast();
   const [pulledParticipantsPage, setPulledParticipantsPage] = useState(1);
   const [schedulePage, setSchedulePage] = useState(1);
   const pageSize = 10;
@@ -131,7 +177,41 @@ export default function JadwalManager({
   const [cTempatName, setCTempatName] = useState<string>('');
   const [cRuangan, setCRuangan] = useState<string>('Ruang Teori A');
   const [cPengajar, setCPengajar] = useState<string>('Hj. Siti Rahmah, S.Ds');
+  // Rentang pelatihan KHUSUS jadwal (independen dari rentang angkatan,
+  // namun tidak boleh mulai sebelum tanggal mulai angkatan)
+  const [cTanggalMulai, setCTanggalMulai] = useState<string>('');
+  const [cTanggalSelesai, setCTanggalSelesai] = useState<string>('');
   const [autoGenerate10Days, setAutoGenerate10Days] = useState<boolean>(true);
+
+  const toDateInput = (d?: string | null) => {
+    if (!d) return '';
+    return d.includes('T') ? d.split('T')[0] : d.slice(0, 10);
+  };
+
+  const addDaysStr = (dateStr: string, days: number) => {
+    const d = new Date(`${dateStr}T00:00:00`);
+    d.setDate(d.getDate() + days);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  };
+
+  const diffDays = (from: string, to: string) => {
+    const a = new Date(`${from}T00:00:00`).getTime();
+    const b = new Date(`${to}T00:00:00`).getTime();
+    return Math.round((b - a) / 86400000);
+  };
+
+  // Angkatan yang dipilih pada form paket + batas minimal tanggal jadwal
+  const selectedCAngkatan = useMemo(
+    () => angkatanList.find((a) => a.id === cAngkatanId) || null,
+    [angkatanList, cAngkatanId]
+  );
+  const cMinTanggal = toDateInput(selectedCAngkatan?.tanggal_mulai);
+  const cAngkatanRangeLabel = selectedCAngkatan
+    ? `${formatDateOnly(selectedCAngkatan.tanggal_mulai)} s.d. ${formatDateOnly(selectedCAngkatan.tanggal_selesai)}`
+    : '-';
 
   // Form State: Tambah/Edit Single Session (in detail modal)
   const [showAddSessionModal, setShowAddSessionModal] = useState<boolean>(false);
@@ -176,13 +256,16 @@ export default function JadwalManager({
   // Load Data
   const loadData = useCallback(async () => {
     try {
-      const [aRes, pRes, jRes, tRes, mpRes] = await Promise.all([
+      const [aRes, pRes, jRes, tRes, insRes, mpRes] = await Promise.all([
         angkatanApi.list(),
         pendaftarApi.list({ per_page: 100 }),
         jadwalApi.list(),
         tempatApi.list(),
+        instrukturApi.list(),
         mataPelajaranApi.list(),
       ]);
+
+      setInstrukturList(insRes.data || []);
 
       const angk = aRes.data || [];
       setAngkatanList(angk);
@@ -212,12 +295,13 @@ export default function JadwalManager({
     if (initialPendaftarList.length > 0) setPendaftarList(initialPendaftarList);
     if (initialJadwalList.length > 0) setJadwalList(initialJadwalList);
     if (initialTempatList.length > 0) setTempatList(initialTempatList);
+    if (initialInstrukturList.length > 0) setInstrukturList(initialInstrukturList);
 
     // Fetch from API only if props were empty
-    if (initialAngkatanList.length === 0 || initialJadwalList.length === 0 || initialTempatList.length === 0) {
+    if (initialAngkatanList.length === 0 || initialJadwalList.length === 0 || initialTempatList.length === 0 || initialInstrukturList.length === 0) {
       loadData();
     }
-  }, [initialAngkatanList, initialPendaftarList, initialJadwalList, initialTempatList]);
+  }, [initialAngkatanList, initialPendaftarList, initialJadwalList, initialTempatList, initialInstrukturList]);
 
   const [selectedTempatForDetail, setSelectedTempatForDetail] = useState<string>('');
 
@@ -290,7 +374,8 @@ export default function JadwalManager({
   ) => {
     setSelectedAngkatanForDetail(ang);
     setSelectedTempatForDetail(tempat);
-    setActiveDetailTab(initialTab);
+    // Pada mode terbatas, paksa tab sesuai mode (kelas→peserta, jadwal→sesi, penilaian→nilai)
+    setActiveDetailTab(mode === 'penuh' ? initialTab : modeDetailTab as 'peserta' | 'jadwal' | 'penilaian' | 'cetak');
     try {
       const res = await angkatanApi.getPendaftar(ang.id);
       if (res.data && Array.isArray(res.data) && res.data.length > 0) {
@@ -431,127 +516,14 @@ export default function JadwalManager({
     }
   };
 
-  interface SchedulePackageCard {
-    key: string;
-    angkatan: Angkatan;
-    tempat_pelatihan: string;
-    ruangan: string;
-    pengajar: string;
-    schedules: JadwalPelatihan[];
-    pesertaCount: number;
-  }
-
-  // Build Schedule Package Cards (Grouped by Angkatan ID + Tempat Pelatihan Combo)
-  const schedulePackageCards = useMemo<SchedulePackageCard[]>(() => {
-    const map = new Map<string, SchedulePackageCard>();
-
-    // 1. Group schedules by angkatan_id + tempat_pelatihan combo
-    for (const j of jadwalList) {
-      if (!j.angkatan_id) continue;
-      const ang = angkatanList.find((a) => a.id === j.angkatan_id);
-      if (!ang) continue;
-
-      const venue = j.tempat_pelatihan || 'Gedung LPK Leles Utama';
-      const comboKey = `${ang.id}:::${venue}`;
-
-      if (!map.has(comboKey)) {
-        map.set(comboKey, {
-          key: comboKey,
-          angkatan: ang,
-          tempat_pelatihan: venue,
-          ruangan: j.ruangan || 'Ruang Teori A',
-          pengajar: j.pengajar || 'Hj. Siti Rahmah, S.Ds',
-          schedules: [],
-          pesertaCount: j.peserta_count || (j.peserta || []).length,
-        });
-      }
-
-      const item = map.get(comboKey)!;
-      item.schedules.push(j);
-      const pCount = j.peserta_count || (j.peserta || []).length;
-      if (pCount > item.pesertaCount) {
-        item.pesertaCount = pCount;
-      }
-    }
-
-    // 2. Ensure Angkatans without any schedules yet still render a default card
-    for (const ang of angkatanList) {
-      const hasCards = Array.from(map.values()).some((item) => item.angkatan.id === ang.id);
-      if (!hasCards) {
-        const defaultVenue = tempatList[0]?.nama_tempat ? `${tempatList[0].nama_tempat} (${tempatList[0].alamat_lengkap})` : 'Gedung LPK Leles Utama (Ruang Teori A)';
-        const comboKey = `${ang.id}:::${defaultVenue}`;
-        map.set(comboKey, {
-          key: comboKey,
-          angkatan: ang,
-          tempat_pelatihan: defaultVenue,
-          ruangan: 'Ruang Teori A',
-          pengajar: 'Hj. Siti Rahmah, S.Ds',
-          schedules: [],
-          pesertaCount: 0,
-        });
-      }
-    }
-
-    const cards = Array.from(map.values());
-
-    // Helper untuk mengekstrak nomor angkatan (misal: "ANG-51" atau "Angkatan 51" -> 51)
-    const getAngkatanNumber = (ang: Angkatan) => {
-      const matchKode = (ang.kode_angkatan || '').match(/\d+/);
-      if (matchKode) return parseInt(matchKode[0], 10);
-      const matchNama = (ang.nama_angkatan || '').match(/\d+/);
-      if (matchNama) return parseInt(matchNama[0], 10);
-      return 0;
-    };
-
-    // Urutkan angkatan terbaru di paling atas (descending)
-    cards.sort((a, b) => {
-      const numA = getAngkatanNumber(a.angkatan);
-      const numB = getAngkatanNumber(b.angkatan);
-
-      // Prioritas 1: Nomor angkatan terbesar di atas (contoh: 51 > 50 > 49)
-      if (numA !== numB) {
-        return numB - numA;
-      }
-
-      // Prioritas 2: Tahun terbaru
-      const tahunA = a.angkatan.tahun || 0;
-      const tahunB = b.angkatan.tahun || 0;
-      if (tahunA !== tahunB) {
-        return tahunB - tahunA;
-      }
-
-      // Prioritas 3: Tanggal mulai terbaru
-      const dateA = a.angkatan.tanggal_mulai ? new Date(a.angkatan.tanggal_mulai).getTime() : 0;
-      const dateB = b.angkatan.tanggal_mulai ? new Date(b.angkatan.tanggal_mulai).getTime() : 0;
-      if (dateA !== dateB) {
-        return dateB - dateA;
-      }
-
-      // Prioritas 4: Nama tempat pelatihan
-      return (a.tempat_pelatihan || '').localeCompare(b.tempat_pelatihan || '');
-    });
-
-    return cards;
-  }, [jadwalList, angkatanList, tempatList]);
-
-  const matchesTempat = (venue: string, filter: string) => {
-    if (!filter || filter === 'semua') return true;
-    if (!venue) return false;
-    const normVenue = venue.toLowerCase();
-    const normFilter = filter.toLowerCase();
-
-    if (normFilter.includes('utama')) return normVenue.includes('utama');
-    if (normFilter.includes('workshop') || normFilter.includes('menjahit')) return normVenue.includes('workshop') || normVenue.includes('menjahit');
-    if (normFilter.includes('garut') || normFilter.includes('cabang') || normFilter.includes('kampus')) return normVenue.includes('garut') || normVenue.includes('cabang') || normVenue.includes('kampus');
-
-    return normVenue.includes(normFilter) || normFilter.includes(normVenue);
-  };
+  // Kartu kelas (angkatan + tempat) — logika di lib/kelas.ts
+  const schedulePackageCards = useMemo<SchedulePackageCard[]>(
+    () => groupJadwalToKelas(jadwalList, angkatanList, tempatList),
+    [jadwalList, angkatanList, tempatList]
+  );
 
   const getSchedulesForPackage = (angkatanId: string, venue: string) =>
-    jadwalList.filter((schedule) =>
-      schedule.angkatan_id === angkatanId &&
-      (schedule.tempat_pelatihan === venue || matchesTempat(schedule.tempat_pelatihan || '', venue))
-    );
+    getSchedulesForKelas(jadwalList, angkatanId, venue);
 
   // Filtered Package Cards by Tempat & Search Query
   const filteredPackageCards = useMemo(() => {
@@ -578,46 +550,149 @@ export default function JadwalManager({
     setCTempatName(card.tempat_pelatihan);
     setCRuangan(card.ruangan || 'Ruang Teori A');
     setCPengajar(card.pengajar || 'Hj. Siti Rahmah, S.Ds');
+    // Rentang jadwal diambil dari sesi paling awal & akhir (independen dari angkatan)
+    const dates = card.schedules
+      .map((s) => toDateInput(s.tanggal))
+      .filter(Boolean)
+      .sort();
+    const angStart = toDateInput(card.angkatan.tanggal_mulai);
+    const angEnd = toDateInput(card.angkatan.tanggal_selesai);
+    setCTanggalMulai(dates[0] || angStart);
+    setCTanggalSelesai(dates[dates.length - 1] || dates[0] || angEnd || (angStart ? addDaysStr(angStart, 9) : ''));
     setShowCreateModal(true);
   };
 
-  const handleDeletePackageCard = async (card: SchedulePackageCard) => {
-    if (!confirm(`Apakah Anda yakin ingin menghapus paket jadwal "${card.angkatan.nama_angkatan}" di ${card.tempat_pelatihan}? (${card.schedules.length} sesi harian akan dihapus)`)) {
-      return;
-    }
+  const fillRentangFromAngkatan = (angkatanId: string) => {
+    const ang = angkatanList.find((a) => a.id === angkatanId);
+    if (!ang) return;
+    const start = toDateInput(ang.tanggal_mulai);
+    if (!start) return;
+    setCTanggalMulai(start);
+    // Default paket 10 hari berurutan dari tanggal mulai
+    setCTanggalSelesai(addDaysStr(start, 9));
+  };
+
+  const handleDeletePackageCard = (card: SchedulePackageCard) => {
+    setPackageDeleteTarget(card);
+  };
+
+  const confirmDeletePackageCard = async () => {
+    if (!packageDeleteTarget) return;
+    const card = packageDeleteTarget;
+
+    setIsDeleting(true);
+    showLoading('delete', `Menghapus paket "${card.angkatan.nama_angkatan}"...`, `Menghapus ${card.schedules.length} sesi harian dari sistem...`);
 
     try {
-      setIsGenerating(true);
       for (const sched of card.schedules) {
-        await jadwalApi.destroy(sched.id);
+        const delRes = await jadwalApi.destroy(sched.id);
+        if (!delRes.success) throw new Error(delRes.error || delRes.message || 'Gagal menghapus sesi paket.');
       }
+      const deletedName = `${card.angkatan.nama_angkatan} — ${card.tempat_pelatihan}`;
+      setPackageDeleteTarget(null);
       await loadData();
-    } catch (err) {
+      showSuccess('delete', 'Paket Jadwal Berhasil Dihapus!', `"${deletedName}" telah dihapus dari sistem.`);
+    } catch (err: any) {
       console.error('Error deleting package card:', err);
+      showError('Gagal Menghapus Paket Jadwal', err?.message || 'Terjadi kesalahan sistem.');
     } finally {
-      setIsGenerating(false);
+      setIsDeleting(false);
     }
   };
 
-  // Handler: Buat / Edit Paket Jadwal (Form Milih Angkatan + Tempat)
+  // Handler: Buat / Edit Paket Jadwal (Form Milih Angkatan + Tempat + Rentang)
   const handleCreateJadwalPackage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!cAngkatanId || !cTempatName) return;
 
+    const isEdit = Boolean(editingPackage);
+    const angkatanMin = toDateInput(selectedCAngkatan?.tanggal_mulai);
+
+    // Validasi rentang jadwal terhadap rentang angkatan
+    if (!cTanggalMulai || !cTanggalSelesai) {
+      showError('Rentang Belum Lengkap', 'Isi tanggal mulai dan tanggal selesai pelatihan jadwal.');
+      return;
+    }
+    if (angkatanMin && cTanggalMulai < angkatanMin) {
+      showError(
+        'Tanggal Mulai Tidak Valid',
+        `Tanggal mulai jadwal (${cTanggalMulai}) tidak boleh sebelum tanggal mulai angkatan (${angkatanMin}).`
+      );
+      return;
+    }
+    if (cTanggalSelesai < cTanggalMulai) {
+      showError('Rentang Tidak Valid', 'Tanggal selesai jadwal tidak boleh sebelum tanggal mulai jadwal.');
+      return;
+    }
+
+    // Tanggal tiap sesi dihitung dengan MELEWATI Minggu & tanggal merah,
+    // sehingga sesi terakhir bisa mundur lebih jauh dari mulai+9 hari.
+    const genTanggalAuto = autoGenerate10Days
+      ? TEMPLATE_10_HARI.map((t) => tambahHariValid(cTanggalMulai, t.hari - 1))
+      : [];
+    if (!isEdit && autoGenerate10Days && genTanggalAuto[genTanggalAuto.length - 1] > cTanggalSelesai) {
+      const leap = hitungHariLibur(cTanggalMulai, cTanggalSelesai);
+      showError(
+        'Rentang Tidak Muat 10 Sesi',
+        `Hari Minggu/libur (${leap} hari) dilewati otomatis sehingga sesi ke-10 jatuh pada ${genTanggalAuto[genTanggalAuto.length - 1]}. Perlebar tanggal selesai hingga minimal tanggal tersebut.`
+      );
+      return;
+    }
+
+    setIsGenerating(true);
+    showLoading(
+      isEdit ? 'edit' : 'add',
+      isEdit ? 'Menyimpan Perubahan Paket...' : 'Membuat Paket Jadwal...',
+      isEdit ? 'Memperbarui tempat, ruangan, pengajar, dan rentang seluruh sesi...' : 'Menyusun paket sesi Hari 1–10...'
+    );
+
+    const fail = (res: { success: boolean; error?: string; message?: string }, fallback: string) => {
+      if (!res.success) throw new Error(res.error || res.message || fallback);
+    };
+
     try {
-      setIsGenerating(true);
 
       if (editingPackage) {
-        for (const sched of editingPackage.schedules) {
-          await jadwalApi.update(sched.id, {
-            tempat_pelatihan: cTempatName,
-            ruangan: cRuangan,
-            pengajar: cPengajar,
-          });
+        // Satu panggilan route bulk — tanggal tiap sesi sudah dilewati
+        // dari Minggu/tanggal merah dan dikirim eksplisit per-sesi
+        const sorted = [...editingPackage.schedules].sort((a, b) => (a.hari_ke || 0) - (b.hari_ke || 0));
+        const baseHari = sorted[0]?.hari_ke || 1;
+        const tanggalMap = sorted.map((s) => ({
+          id: s.id,
+          tanggal: tambahHariValid(cTanggalMulai, (s.hari_ke || baseHari) - baseHari),
+        }));
+        const lastTanggal = tanggalMap[tanggalMap.length - 1]?.tanggal || '';
+        if (lastTanggal && lastTanggal > cTanggalSelesai) {
+          showError(
+            'Rentang Tidak Muat',
+            `Hari Minggu/libur dilewati otomatis sehingga sesi terakhir jatuh pada ${lastTanggal}. Perlebar tanggal selesai hingga minimal tanggal tersebut.`
+          );
+          return;
         }
+        const res = await jadwalApi.updatePaket({
+          angkatan_id: editingPackage.angkatan.id,
+          tempat_lama: editingPackage.tempat_pelatihan,
+          tempat_pelatihan: cTempatName,
+          ruangan: cRuangan,
+          pengajar: cPengajar,
+          tanggal_mulai: cTanggalMulai,
+          tanggal_selesai: cTanggalSelesai,
+          sesi: tanggalMap,
+        });
+        fail(res, 'Gagal memperbarui paket jadwal.');
+        const savedName = editingPackage.angkatan.nama_angkatan;
+        // Langsung gabungkan sesi terupdate ke list agar kartu overview &
+        // form edit langsung menampilkan perubahan tanpa menunggu loadData
+        if (res.data && Array.isArray(res.data)) {
+          const updatedById = new Map(res.data.map((s: JadwalPelatihan) => [s.id, s]));
+          setJadwalList((prev) => prev.map((j) => updatedById.get(j.id) || j));
+        }
+        // Sinkronkan filter detail bila tempat paket ikut berubah
+        setSelectedTempatForDetail(cTempatName);
         setShowCreateModal(false);
         setEditingPackage(null);
         await loadData();
+        showSuccess('edit', 'Paket Jadwal Berhasil Diperbarui!', `"${savedName}" (${cTanggalMulai} s.d. ${cTanggalSelesai}) telah diperbarui.`);
         return;
       }
 
@@ -625,16 +700,13 @@ export default function JadwalManager({
       const programNama = targetAngkatan?.program?.nama || targetAngkatan?.program_id || 'Tata Boga & Pastry';
 
       if (autoGenerate10Days) {
-        const startDate = targetAngkatan?.tanggal_mulai
-          ? new Date(targetAngkatan.tanggal_mulai)
-          : new Date();
+        // Rentang jadwal independen: mulai dari tanggal mulai form (bukan otomatis tanggal angkatan).
+        // Hari Minggu & tanggal merah dilewati otomatis.
+        for (let i = 0; i < TEMPLATE_10_HARI.length; i++) {
+          const tmpl = TEMPLATE_10_HARI[i];
+          const dateStr = genTanggalAuto[i] || tambahHariValid(cTanggalMulai, tmpl.hari - 1);
 
-        for (const tmpl of TEMPLATE_10_HARI) {
-          const currentDate = new Date(startDate);
-          currentDate.setDate(startDate.getDate() + (tmpl.hari - 1));
-          const dateStr = currentDate.toISOString().split('T')[0];
-
-          await jadwalApi.create({
+          const res = await jadwalApi.create({
             judul: `${tmpl.judul} - ${targetAngkatan?.kode_angkatan}`,
             jenis_pelatihan: programNama,
             angkatan_id: cAngkatanId,
@@ -647,14 +719,15 @@ export default function JadwalManager({
             jenis_sesi: tmpl.sesi,
             status: 'akan_datang',
           });
+          fail(res, 'Gagal membuat sesi paket.');
         }
       } else {
-        await jadwalApi.create({
+        const res = await jadwalApi.create({
           judul: `Sesi Perdana Pelatihan - ${targetAngkatan?.kode_angkatan}`,
           jenis_pelatihan: programNama,
           angkatan_id: cAngkatanId,
           hari_ke: 1,
-          tanggal: targetAngkatan?.tanggal_mulai ? targetAngkatan.tanggal_mulai.split('T')[0] : new Date().toISOString().split('T')[0],
+          tanggal: cTanggalMulai,
           jam: '08:00 - 12:00',
           ruangan: cRuangan,
           tempat_pelatihan: cTempatName,
@@ -662,12 +735,15 @@ export default function JadwalManager({
           jenis_sesi: 'Teori',
           status: 'akan_datang',
         });
+        fail(res, 'Gagal membuat sesi perdana.');
       }
 
       setShowCreateModal(false);
       await loadData();
-    } catch (err) {
+      showSuccess('add', 'Paket Jadwal Berhasil Dibuat!', `Rentang ${cTanggalMulai} s.d. ${cTanggalSelesai} telah tersusun.`);
+    } catch (err: any) {
       console.error('Error creating jadwal package:', err);
+      showError('Gagal Menyimpan Paket Jadwal', err?.message || 'Terjadi kesalahan sistem.');
     } finally {
       setIsGenerating(false);
     }
@@ -688,15 +764,19 @@ export default function JadwalManager({
 
     try {
       setIsGenerating(true);
+      showLoading('add', 'Menarik Peserta ke Jadwal...', `Memasukkan ${angkatanCandidates.length} peserta ke ${angSchedules.length} sesi...`);
       const participantIds = angkatanCandidates.map((p) => p.id);
 
       for (const sched of angSchedules) {
-        await jadwalApi.addPeserta(sched.id, participantIds);
+        const res = await jadwalApi.addPeserta(sched.id, participantIds);
+        if (!res.success) throw new Error(res.error || res.message || `Gagal menarik peserta ke sesi "${sched.judul}".`);
       }
 
       await loadData();
-    } catch (err) {
+      showSuccess('add', 'Peserta Berhasil Ditarik!', `${participantIds.length} peserta dimasukkan ke jadwal.`);
+    } catch (err: any) {
       console.error('Error bulk pulling participants:', err);
+      showError('Gagal Menarik Peserta', err?.message || 'Terjadi kesalahan sistem.');
     } finally {
       setIsGenerating(false);
     }
@@ -712,16 +792,25 @@ export default function JadwalManager({
 
     try {
       setIsGenerating(true);
+      showLoading('edit', isCurrentlyAdded ? 'Mengeluarkan Peserta...' : 'Menambahkan Peserta...', 'Memperbarui seluruh sesi paket...');
+      let gagal = 0;
       for (const sched of angSchedules) {
-        if (isCurrentlyAdded) {
-          await jadwalApi.removePeserta(sched.id, pendaftarId);
-        } else {
-          await jadwalApi.addPeserta(sched.id, [pendaftarId]);
+        const res = isCurrentlyAdded
+          ? await jadwalApi.removePeserta(sched.id, pendaftarId)
+          : await jadwalApi.addPeserta(sched.id, [pendaftarId]);
+        if (!res.success) {
+          gagal++;
+          console.error(`Gagal memproses sesi "${sched.judul}":`, res.error || res.message);
         }
       }
       await loadData();
-    } catch (err) {
+      if (gagal > 0) {
+        throw new Error(`${gagal} dari ${angSchedules.length} sesi gagal diproses. Sebagian jadwal mungkin belum berubah — silakan coba lagi.`);
+      }
+      showSuccess('edit', isCurrentlyAdded ? 'Peserta Dikeluarkan!' : 'Peserta Ditambahkan!', isCurrentlyAdded ? 'Peserta dilepas dari seluruh sesi paket — jadwalnya ikut hilang dari portal peserta.' : 'Daftar peserta jadwal telah diperbarui.');
+    } catch (err: any) {
       console.error('Error toggling single participant:', err);
+      showError('Gagal Memproses Peserta', err?.message || 'Terjadi kesalahan sistem.');
     } finally {
       setIsGenerating(false);
     }
@@ -731,13 +820,13 @@ export default function JadwalManager({
   const handleGenerate10DaysForDetail = async (ang: Angkatan, venueName: string) => {
     try {
       setIsGenerating(true);
+      showLoading('add', 'Membuat 10 Sesi Otomatis...', 'Menyusun sesi Hari 1–10 (lewati Minggu & tanggal merah)...');
       const programNama = ang.program?.nama || ang.program_id || 'Tata Boga & Pastry';
-      const startDate = ang.tanggal_mulai ? new Date(ang.tanggal_mulai) : new Date();
+      const startStr = toDateInput(ang.tanggal_mulai) || new Date().toISOString().split('T')[0];
 
       for (const tmpl of TEMPLATE_10_HARI) {
-        const currentDate = new Date(startDate);
-        currentDate.setDate(startDate.getDate() + (tmpl.hari - 1));
-        const dateStr = currentDate.toISOString().split('T')[0];
+        // Hari Minggu & tanggal merah dilewati otomatis
+        const dateStr = tambahHariValid(startStr, tmpl.hari - 1);
 
         await jadwalApi.create({
           judul: `${tmpl.judul} - ${ang.kode_angkatan}`,
@@ -751,12 +840,16 @@ export default function JadwalManager({
           pengajar: 'Hj. Siti Rahmah, S.Ds',
           jenis_sesi: tmpl.sesi,
           status: 'akan_datang',
+        }).then((res) => {
+          if (!res.success) throw new Error(res.error || res.message || `Gagal membuat sesi Hari ke-${tmpl.hari}.`);
         });
       }
 
       await loadData();
-    } catch (err) {
+      showSuccess('add', '10 Sesi Berhasil Dibuat!', 'Paket sesi Hari 1–10 telah tersusun.');
+    } catch (err: any) {
       console.error('Error generating 10 days:', err);
+      showError('Gagal Membuat Sesi Otomatis', err?.message || 'Terjadi kesalahan sistem.');
     } finally {
       setIsGenerating(false);
     }
@@ -829,6 +922,24 @@ export default function JadwalManager({
     e.preventDefault();
     if (!selectedAngkatanForDetail || !sJudul || !sTanggal) return;
 
+    // Tanggal sesi tidak boleh sebelum tanggal mulai angkatan
+    const detailMinTanggal = toDateInput(selectedAngkatanForDetail.tanggal_mulai);
+    if (detailMinTanggal && sTanggal < detailMinTanggal) {
+      showError(
+        'Tanggal Sesi Tidak Valid',
+        `Tanggal sesi (${sTanggal}) tidak boleh sebelum tanggal mulai angkatan (${detailMinTanggal}).`
+      );
+      return;
+    }
+
+    const isEdit = Boolean(editingSession);
+    setIsSavingSession(true);
+    showLoading(
+      isEdit ? 'edit' : 'add',
+      isEdit ? 'Menyimpan Perubahan Sesi...' : 'Menambahkan Sesi Baru...',
+      'Sedang menyimpan sesi ke sistem...'
+    );
+
     try {
       const ang = selectedAngkatanForDetail;
       const angSchedules = getSchedulesForPackage(ang.id, selectedTempatForDetail);
@@ -849,17 +960,34 @@ export default function JadwalManager({
         status: 'akan_datang',
       };
 
-      if (editingSession) {
-        await jadwalApi.update(editingSession.id, payload);
-      } else {
-        await jadwalApi.create(payload);
+      const res = editingSession
+        ? await jadwalApi.update(editingSession.id, payload)
+        : await jadwalApi.create(payload);
+      if (!res.success) throw new Error(res.error || res.message || 'Gagal menyimpan sesi.');
+
+      // Langsung gabungkan hasil ke list agar tampilan sesi terupdate seketika
+      if (res.data && (res.data as JadwalPelatihan).id) {
+        const saved = res.data as JadwalPelatihan;
+        setJadwalList((prev) => {
+          const exists = prev.some((j) => j.id === saved.id);
+          return exists ? prev.map((j) => (j.id === saved.id ? { ...j, ...saved } : j)) : [...prev, saved];
+        });
       }
 
+      const savedTitle = sJudul;
       setShowAddSessionModal(false);
       setEditingSession(null);
       await loadData();
-    } catch (err) {
+      showSuccess(
+        isEdit ? 'edit' : 'add',
+        isEdit ? 'Sesi Berhasil Diperbarui!' : 'Sesi Baru Berhasil Ditambahkan!',
+        `"${savedTitle}" telah tersimpan.`
+      );
+    } catch (err: any) {
       console.error('Error saving session:', err);
+      showError('Gagal Menyimpan Sesi', err?.message || 'Terjadi kesalahan sistem.');
+    } finally {
+      setIsSavingSession(false);
     }
   };
 
@@ -869,9 +997,23 @@ export default function JadwalManager({
 
   const confirmDeleteSession = async () => {
     if (!deleteTarget) return;
-    await jadwalApi.destroy(deleteTarget.id);
-    setDeleteTarget(null);
-    await loadData();
+
+    setIsDeleting(true);
+    showLoading('delete', `Menghapus ${deleteTarget.name}...`, 'Sedang menghapus sesi dari sistem...');
+
+    try {
+      const delRes = await jadwalApi.destroy(deleteTarget.id);
+      if (!delRes.success) throw new Error(delRes.error || delRes.message || 'Gagal menghapus sesi.');
+      const deletedName = deleteTarget.name;
+      setDeleteTarget(null);
+      await loadData();
+      showSuccess('delete', 'Sesi Berhasil Dihapus!', `"${deletedName}" telah dihapus.`);
+    } catch (err: any) {
+      console.error('Error deleting session:', err);
+      showError('Gagal Menghapus Sesi', err?.message || 'Terjadi kesalahan sistem.');
+    } finally {
+      setIsDeleting(false);
+    }
   };
 
   // =========================================================================
@@ -886,6 +1028,18 @@ export default function JadwalManager({
 
     const venue = selectedTempatForDetail || angSchedules[0]?.tempat_pelatihan || cTempatName;
     const room = angSchedules[0]?.ruangan || cRuangan;
+
+    // Rentang pelatihan KHUSUS jadwal (dari sesi paling awal & akhir).
+    // Independen dari rentang angkatan; fallback ke rentang angkatan bila belum ada sesi.
+    const jadwalTanggalList = angSchedules
+      .map((s) => toDateInput(s.tanggal))
+      .filter(Boolean)
+      .sort();
+    const jadwalRangeMulai = jadwalTanggalList[0] || toDateInput(ang.tanggal_mulai);
+    const jadwalRangeSelesai =
+      jadwalTanggalList[jadwalTanggalList.length - 1] ||
+      jadwalTanggalList[0] ||
+      toDateInput(ang.tanggal_selesai);
 
     // ID Peserta yang saat ini sudah ditarik di paket jadwal ini (diambil dari seluruh sesi jadwal angkatan)
     const pulledParticipantsMap = new Map<string, Pendaftar>();
@@ -914,7 +1068,7 @@ export default function JadwalManager({
               <line x1="19" y1="12" x2="5" y2="12" />
               <polyline points="12 19 5 12 12 5" />
             </svg>
-            <span>Kembali ke Daftar Paket Jadwal</span>
+            <span>{mode === 'penuh' ? 'Kembali ke Daftar Paket Jadwal' : 'Kembali ke Daftar Kelas'}</span>
           </button>
 
           <div className="flex items-center gap-2">
@@ -946,61 +1100,41 @@ export default function JadwalManager({
             </div>
 
             <div className="p-3 rounded-xl bg-slate-50 border border-slate-100">
-              <div className="text-[11px] text-slate-400 font-medium">Rentang Pelatihan</div>
+              <div className="text-[11px] text-slate-400 font-medium">Rentang Pelatihan (Jadwal)</div>
               <div className="font-bold font-mono text-slate-800 text-xs mt-0.5">
-                {formatDateOnly(ang.tanggal_mulai)} s.d. {formatDateOnly(ang.tanggal_selesai)}
+                {jadwalRangeMulai ? formatDateOnly(jadwalRangeMulai) : '-'} s.d. {jadwalRangeSelesai ? formatDateOnly(jadwalRangeSelesai) : '-'}
+              </div>
+              <div className="text-[10px] text-slate-400 mt-0.5">
+                Angkatan: {formatDateOnly(ang.tanggal_mulai)} s.d. {formatDateOnly(ang.tanggal_selesai)}
               </div>
             </div>
           </div>
         </div>
 
-        {/* SUBTAB DETAIL JADWAL */}
+        {/* SUBTAB DETAIL JADWAL (dibatasi sesuai mode) */}
         <div className="flex flex-wrap items-center gap-2 p-1.5 bg-slate-100 rounded-2xl w-fit">
-          <button
-            onClick={() => setActiveDetailTab('peserta')}
-            className={`px-4 py-2 text-xs font-bold rounded-xl transition-all flex items-center gap-2 ${activeDetailTab === 'peserta'
-              ? 'bg-white shadow-sm text-indigo-700'
-              : 'text-slate-600 hover:text-slate-900'
-              }`}
-          >
-            <span>Daftar Peserta</span>
-            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-slate-200 text-slate-700">
-              {pulledParticipants.length} Peserta
-            </span>
-          </button>
-
-          <button
-            onClick={() => setActiveDetailTab('jadwal')}
-            className={`px-4 py-2 text-xs font-bold rounded-xl transition-all flex items-center gap-2 ${activeDetailTab === 'jadwal'
-              ? 'bg-white shadow-sm text-indigo-700'
-              : 'text-slate-600 hover:text-slate-900'
-              }`}
-          >
-            <span>Jadwal Sesi Pelatihan</span>
-            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-slate-200 text-slate-700">
-              {angSchedules.length} Sesi
-            </span>
-          </button>
-
-          <button
-            onClick={() => setActiveDetailTab('penilaian')}
-            className={`px-4 py-2 text-xs font-bold rounded-xl transition-all flex items-center gap-2 ${activeDetailTab === 'penilaian'
-              ? 'bg-white shadow-sm text-amber-700'
-              : 'text-slate-600 hover:text-slate-900'
-              }`}
-          >
-            <span>Penilaian Peserta</span>
-          </button>
-
-          <button
-            onClick={() => setActiveDetailTab('cetak')}
-            className={`px-4 py-2 text-xs font-bold rounded-xl transition-all flex items-center gap-2 ${activeDetailTab === 'cetak'
-              ? 'bg-white shadow-sm text-purple-700'
-              : 'text-slate-600 hover:text-slate-900'
-              }`}
-          >
-            <span>Cetak Lembar Absensi</span>
-          </button>
+          {([
+            { id: 'peserta' as const, label: 'Daftar Peserta', badge: `${pulledParticipants.length} Peserta`, activeColor: 'text-indigo-700' },
+            { id: 'jadwal' as const, label: 'Jadwal Sesi Pelatihan', badge: `${angSchedules.length} Sesi`, activeColor: 'text-indigo-700' },
+            { id: 'penilaian' as const, label: 'Penilaian Peserta', badge: null as string | null, activeColor: 'text-amber-700' },
+            { id: 'cetak' as const, label: 'Cetak Lembar Absensi', badge: null as string | null, activeColor: 'text-purple-700' },
+          ]).filter((t) => allowedTabs.includes(t.id)).map((t) => (
+            <button
+              key={t.id}
+              onClick={() => setActiveDetailTab(t.id)}
+              className={`px-4 py-2 text-xs font-bold rounded-xl transition-all flex items-center gap-2 ${activeDetailTab === t.id
+                ? `bg-white shadow-sm ${t.activeColor}`
+                : 'text-slate-600 hover:text-slate-900'
+                }`}
+            >
+              <span>{t.label}</span>
+              {t.badge && (
+                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-slate-200 text-slate-700">
+                  {t.badge}
+                </span>
+              )}
+            </button>
+          ))}
         </div>
 
         {/* ========================================================================= */}
@@ -1127,7 +1261,14 @@ export default function JadwalManager({
                       setIsCustomJudul(false);
                       setSJudul('');
                       setSHariKe(angSchedules.length + 1);
-                      setSTanggal(ang.tanggal_mulai ? ang.tanggal_mulai.split('T')[0] : new Date().toISOString().split('T')[0]);
+                      setSTanggal(
+                        jadwalTanggalList.length > 0
+                          ? tambahHariValid(jadwalTanggalList[jadwalTanggalList.length - 1], 1)
+                          : tambahHariValid(
+                              ang.tanggal_mulai ? ang.tanggal_mulai.split('T')[0] : new Date().toISOString().split('T')[0],
+                              0
+                            )
+                      );
                       setSJam('08:00 - 12:00');
                       setSRuangan(room);
                       setSPengajar(angSchedules[0]?.pengajar || 'Hj. Siti Rahmah, S.Ds');
@@ -1289,7 +1430,7 @@ export default function JadwalManager({
                                   </button>
                                   <button
                                     type="button"
-                                    onClick={() => handleDeleteSession(s.id)}
+                                    onClick={() => handleDeleteSession(s.id, s.judul || 'sesi harian ini')}
                                     className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-md transition-colors shadow-2xs cursor-pointer"
                                     title="Hapus Sesi"
                                   >
@@ -1583,7 +1724,7 @@ export default function JadwalManager({
                   </div>
                   <div className="space-y-1">
                     <div className="flex"><span className="w-36 font-semibold">Instruktur Pengajar</span><span>: {angSchedules[0]?.pengajar || '-'}</span></div>
-                    <div className="flex"><span className="w-36 font-semibold">Periode Pelatihan</span><span>: {formatDateOnly(ang.tanggal_mulai)} s.d. {formatDateOnly(ang.tanggal_selesai)}</span></div>
+                    <div className="flex"><span className="w-36 font-semibold">Periode Pelatihan</span><span>: {jadwalRangeMulai ? formatDateOnly(jadwalRangeMulai) : '-'} s.d. {jadwalRangeSelesai ? formatDateOnly(jadwalRangeSelesai) : '-'}</span></div>
                     <div className="flex"><span className="w-36 font-semibold">Jumlah Peserta</span><span>: {(pulledParticipants.length > 0 ? pulledParticipants : angkatanCandidates).length} orang</span></div>
                   </div>
                 </div>
@@ -1612,11 +1753,9 @@ export default function JadwalManager({
                               let dayDate = '';
                               if (session?.tanggal) {
                                 dayDate = formatShortDate(session.tanggal);
-                              } else if (ang.tanggal_mulai) {
+                              } else if (jadwalRangeMulai) {
                                 try {
-                                  const d = new Date(ang.tanggal_mulai);
-                                  d.setDate(d.getDate() + i);
-                                  dayDate = formatShortDate(d.toISOString().split('T')[0]);
+                                  dayDate = formatShortDate(addDaysStr(jadwalRangeMulai, i));
                                 } catch (e) { }
                               }
 
@@ -1842,13 +1981,18 @@ export default function JadwalManager({
 
         {/* Modal Add / Edit Sesi Harian */}
         {showAddSessionModal && (
-          <div className="modal-overlay" onClick={() => setShowAddSessionModal(false)}>
-            <div className="modal-content max-w-lg p-6" onClick={(e) => e.stopPropagation()}>
+          <div className="modal-overlay" onClick={() => { if (!isSavingSession) setShowAddSessionModal(false); }}>
+            <div className="modal-content relative max-w-lg p-6 overflow-hidden" onClick={(e) => e.stopPropagation()}>
+              {isSavingSession && (
+                <div className="absolute top-0 left-0 right-0 h-1 bg-indigo-100 overflow-hidden">
+                  <div className="h-full bg-gradient-to-r from-blue-600 via-indigo-500 to-blue-600 animate-progress-infinite" />
+                </div>
+              )}
               <div className="flex justify-between items-center pb-3 border-b border-slate-100 mb-4">
                 <h3 className="font-bold text-slate-800 text-sm">
                   {editingSession ? 'Edit Sesi Harian' : 'Tambah Sesi Harian Pelatihan'}
                 </h3>
-                <button onClick={() => setShowAddSessionModal(false)} className="text-slate-400 hover:text-black">
+                <button disabled={isSavingSession} onClick={() => setShowAddSessionModal(false)} className="text-slate-400 hover:text-black disabled:opacity-40">
                   ✕
                 </button>
               </div>
@@ -1960,9 +2104,20 @@ export default function JadwalManager({
                       type="date"
                       className="form-input"
                       value={sTanggal}
+                      min={toDateInput(selectedAngkatanForDetail?.tanggal_mulai) || undefined}
                       onChange={(e) => setSTanggal(e.target.value)}
                       required
                     />
+                    {selectedAngkatanForDetail?.tanggal_mulai && (
+                      <p className="text-[11px] text-slate-400 mt-1">
+                        Tidak boleh sebelum mulai angkatan ({toDateInput(selectedAngkatanForDetail.tanggal_mulai)}).
+                      </p>
+                    )}
+                    {sTanggal && isTanggalMerah(sTanggal) && (
+                      <p className="text-[11px] font-semibold text-amber-600 mt-1">
+                        Perhatian: {sTanggal} adalah {keteranganTanggalMerah(sTanggal)} — sesi sebaiknya digeser ke hari valid.
+                      </p>
+                    )}
                   </div>
                   <div>
                     <label className="form-label font-bold text-slate-700">Jam</label>
@@ -1990,22 +2145,27 @@ export default function JadwalManager({
                   </div>
                   <div>
                     <label className="form-label font-bold text-slate-700">Pengajar</label>
-                    <input
-                      type="text"
-                      className="form-input"
+                    <InstrukturSearchSelect
                       value={sPengajar}
-                      onChange={(e) => setSPengajar(e.target.value)}
+                      onChange={setSPengajar}
+                      instrukturList={instrukturList}
+                      placeholder="Ketik untuk cari instruktur..."
                       required
                     />
                   </div>
                 </div>
 
                 <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
-                  <button type="button" onClick={() => setShowAddSessionModal(false)} className="btn btn-outline btn-sm">
+                  <button type="button" disabled={isSavingSession} onClick={() => setShowAddSessionModal(false)} className="btn btn-outline btn-sm disabled:opacity-50">
                     Batal
                   </button>
-                  <button type="submit" className="btn btn-primary btn-sm font-bold">
-                    {editingSession ? 'Simpan Perubahan' : 'Tambah Sesi'}
+                  <button type="submit" disabled={isSavingSession} className="btn btn-primary btn-sm font-bold flex items-center gap-1.5 disabled:opacity-75 disabled:cursor-not-allowed">
+                    {isSavingSession && (
+                      <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    )}
+                    {isSavingSession
+                      ? (editingSession ? 'Menyimpan...' : 'Menambahkan...')
+                      : (editingSession ? 'Simpan Perubahan' : 'Tambah Sesi')}
                   </button>
                 </div>
               </form>
@@ -2053,6 +2213,20 @@ export default function JadwalManager({
             </div>
           </div>
         )}
+
+        <DeleteConfirmModal
+          open={Boolean(deleteTarget)}
+          title="Hapus Sesi?"
+          message="Anda yakin ingin menghapus sesi"
+          itemName={deleteTarget?.name || null}
+          loading={isDeleting}
+          onConfirm={confirmDeleteSession}
+          onCancel={() => {
+            if (!isDeleting) setDeleteTarget(null);
+          }}
+        />
+
+        <ActionToast toast={actionToast} onClose={hideToast} />
       </div>
     );
   }
@@ -2065,24 +2239,28 @@ export default function JadwalManager({
       {/* HEADER BAR */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[var(--card-border)]">
         <div>
-          <h2 className="text-xl font-bold text-[var(--text-primary)]">Kelola Jadwal & Lokasi Pelatihan</h2>
+          <h2 className="text-xl font-bold text-[var(--text-primary)]">{modeTitle}</h2>
           <p className="text-xs text-[var(--text-secondary)]">
-            Buat Paket Jadwal (Milih Angkatan + Tempat Pelatihan) ➔ Klik Card Kotak untuk Tarik Peserta & Susun Jadwal Hari 1-10
+            {modeSubtitle}
           </p>
         </div>
-        <button
-          onClick={() => {
-            if (angkatanList.length > 0 && !cAngkatanId) setCAngkatanId(angkatanList[0].id);
-            setShowCreateModal(true);
-          }}
-          className="btn btn-primary btn-sm flex items-center gap-1.5 font-bold self-start sm:self-auto shadow-sm"
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <line x1="12" y1="5" x2="12" y2="19" />
-            <line x1="5" y1="12" x2="19" y2="12" />
-          </svg>
-          <span>Buat Jadwal Baru</span>
-        </button>
+        {canManagePackage && (
+          <button
+            onClick={() => {
+              const firstId = angkatanList.length > 0 && !cAngkatanId ? angkatanList[0].id : cAngkatanId;
+              if (angkatanList.length > 0 && !cAngkatanId) setCAngkatanId(angkatanList[0].id);
+              if (firstId && !editingPackage) fillRentangFromAngkatan(firstId);
+              setShowCreateModal(true);
+            }}
+            className="btn btn-primary btn-sm flex items-center gap-1.5 font-bold self-start sm:self-auto shadow-sm"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="12" y1="5" x2="12" y2="19" />
+              <line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
+            <span>Buat Jadwal Baru</span>
+          </button>
+        )}
       </div>
 
       {/* FILTER BAR BERDASARKAN TEMPAT */}
@@ -2141,9 +2319,12 @@ export default function JadwalManager({
             <tbody className="divide-y divide-slate-100 text-xs">
               {filteredPackageCards.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="text-center py-12 text-slate-400 text-xs">
-                    Tidak ada paket jadwal yang ditemukan. Klik tombol <b>"Buat Jadwal Baru"</b> untuk menambahkan paket jadwal.
-                  </td>
+                    <td colSpan={5} className="text-center py-12 text-slate-400 text-xs">
+                      Tidak ada kelas yang ditemukan.
+                      {canManagePackage && (
+                        <> Klik tombol <b>"Buat Jadwal Baru"</b> untuk menambahkan paket jadwal.</>
+                      )}
+                    </td>
                 </tr>
               ) : (
                 filteredPackageCards.map((card) => {
@@ -2219,48 +2400,58 @@ export default function JadwalManager({
                       <td className="py-3 px-4 text-right whitespace-nowrap">
                         <div className="flex items-center justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
                           {/* Peserta Button */}
-                          <button
-                            type="button"
-                            title="Kelola Daftar Peserta"
-                            onClick={() => handleOpenDetailCard(ang, venue, 'peserta')}
-                            className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold text-sky-700 bg-sky-50 hover:bg-sky-100 border border-sky-200 rounded-md transition-colors shadow-2xs cursor-pointer"
-                          >
-                            <span>Peserta</span>
-                          </button>
+                          {allowedTabs.includes('peserta') && (
+                            <button
+                              type="button"
+                              title="Kelola Daftar Peserta"
+                              onClick={() => handleOpenDetailCard(ang, venue, 'peserta')}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold text-sky-700 bg-sky-50 hover:bg-sky-100 border border-sky-200 rounded-md transition-colors shadow-2xs cursor-pointer"
+                            >
+                              <span>Peserta</span>
+                            </button>
+                          )}
 
                           {/* Sesi Button */}
-                          <button
-                            type="button"
-                            title="Kelola Jadwal Sesi Pelatihan"
-                            onClick={() => handleOpenDetailCard(ang, venue, 'jadwal')}
-                            className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-md transition-colors shadow-2xs cursor-pointer"
-                          >
-                            <span>Sesi</span>
-                          </button>
+                          {allowedTabs.includes('jadwal') && (
+                            <button
+                              type="button"
+                              title="Kelola Jadwal Sesi Pelatihan"
+                              onClick={() => handleOpenDetailCard(ang, venue, 'jadwal')}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-md transition-colors shadow-2xs cursor-pointer"
+                            >
+                              <span>Sesi</span>
+                            </button>
+                          )}
 
                           {/* Nilai Button */}
-                          <button
-                            type="button"
-                            title="Input Penilaian Peserta"
-                            onClick={() => handleOpenDetailCard(ang, venue, 'penilaian')}
-                            className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-md transition-colors shadow-2xs cursor-pointer"
-                          >
-                            <span>Nilai</span>
-                          </button>
+                          {allowedTabs.includes('penilaian') && (
+                            <button
+                              type="button"
+                              title="Input Penilaian Peserta"
+                              onClick={() => handleOpenDetailCard(ang, venue, 'penilaian')}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-md transition-colors shadow-2xs cursor-pointer"
+                            >
+                              <span>Nilai</span>
+                            </button>
+                          )}
 
                           {/* Cetak Button */}
-                          <button
-                            type="button"
-                            title="Cetak Lembar Absensi PDF"
-                            onClick={() => handleOpenDetailCard(ang, venue, 'cetak')}
-                            className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold text-purple-700 bg-purple-50 hover:bg-purple-100 border border-purple-200 rounded-md transition-colors shadow-2xs cursor-pointer"
-                          >
-                            <span>Cetak</span>
-                          </button>
+                          {allowedTabs.includes('cetak') && (
+                            <button
+                              type="button"
+                              title="Cetak Lembar Absensi PDF"
+                              onClick={() => handleOpenDetailCard(ang, venue, 'cetak')}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold text-purple-700 bg-purple-50 hover:bg-purple-100 border border-purple-200 rounded-md transition-colors shadow-2xs cursor-pointer"
+                            >
+                              <span>Cetak</span>
+                            </button>
+                          )}
 
-                          <div className="h-4 w-px bg-slate-200 mx-0.5" />
+                          {canManagePackage && <div className="h-4 w-px bg-slate-200 mx-0.5" />}
 
                           {/* Edit Button */}
+                          {canManagePackage && (
+                          <>
                           <button
                             type="button"
                             title="Edit Paket Jadwal"
@@ -2286,6 +2477,8 @@ export default function JadwalManager({
                             </svg>
                             <span>Hapus</span>
                           </button>
+                          </>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -2299,8 +2492,13 @@ export default function JadwalManager({
 
       {/* FORM MODAL: BUAT JADWAL BARU */}
       {showCreateModal && (
-        <div className="modal-overlay" onClick={() => { setShowCreateModal(false); setEditingPackage(null); }}>
-          <div className="modal-content max-w-lg p-6" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-overlay" onClick={() => { if (!isGenerating) { setShowCreateModal(false); setEditingPackage(null); } }}>
+          <div className="modal-content relative max-w-lg p-6 overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            {isGenerating && (
+              <div className="absolute top-0 left-0 right-0 h-1 bg-indigo-100 overflow-hidden">
+                <div className="h-full bg-gradient-to-r from-blue-600 via-indigo-500 to-blue-600 animate-progress-infinite" />
+              </div>
+            )}
             <div className="flex justify-between items-center pb-3 border-b border-slate-100 mb-4">
               <div>
                 <h3 className="font-bold text-slate-800 text-sm">
@@ -2312,7 +2510,7 @@ export default function JadwalManager({
                     : 'Form memilih angkatan dan alokasi tempat pelatihan'}
                 </p>
               </div>
-              <button onClick={() => { setShowCreateModal(false); setEditingPackage(null); }} className="text-slate-400 hover:text-black">
+              <button onClick={() => { if (!isGenerating) { setShowCreateModal(false); setEditingPackage(null); } }} disabled={isGenerating} className="text-slate-400 hover:text-black disabled:opacity-40">
                 ✕
               </button>
             </div>
@@ -2323,7 +2521,10 @@ export default function JadwalManager({
                 <select
                   className="form-input"
                   value={cAngkatanId}
-                  onChange={(e) => setCAngkatanId(e.target.value)}
+                  onChange={(e) => {
+                    setCAngkatanId(e.target.value);
+                    if (!editingPackage) fillRentangFromAngkatan(e.target.value);
+                  }}
                   required
                 >
                   {angkatanList.map((a) => (
@@ -2353,6 +2554,44 @@ export default function JadwalManager({
                 </p>
               </div>
 
+              <div>
+                <label className="form-label font-bold text-slate-700">3. Rentang Pelatihan Jadwal</label>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[11px] font-semibold text-slate-500">Tanggal Mulai</label>
+                    <input
+                      type="date"
+                      className="form-input"
+                      value={cTanggalMulai}
+                      min={cMinTanggal || undefined}
+                      onChange={(e) => setCTanggalMulai(e.target.value)}
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-semibold text-slate-500">Tanggal Selesai</label>
+                    <input
+                      type="date"
+                      className="form-input"
+                      value={cTanggalSelesai}
+                      min={cTanggalMulai || cMinTanggal || undefined}
+                      onChange={(e) => setCTanggalSelesai(e.target.value)}
+                      required
+                    />
+                  </div>
+                </div>
+                <p className="text-[11px] text-slate-400 mt-1">
+                  Rentang angkatan: <span className="font-semibold text-slate-600">{cAngkatanRangeLabel}</span>.
+                  Tanggal mulai jadwal tidak boleh sebelum tanggal mulai angkatan
+                  {cMinTanggal ? (<span className="font-mono font-semibold"> ({cMinTanggal})</span>) : ''}.
+                </p>
+                {cTanggalMulai && cTanggalSelesai && cTanggalSelesai >= cTanggalMulai && (
+                  <p className="text-[11px] text-indigo-600 mt-1">
+                    Hari Minggu & tanggal merah ({hitungHariLibur(cTanggalMulai, cTanggalSelesai)} hari) dilewati otomatis saat generate.
+                  </p>
+                )}
+              </div>
+
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="form-label font-bold text-slate-700">Ruangan Default</label>
@@ -2367,12 +2606,11 @@ export default function JadwalManager({
                 </div>
                 <div>
                   <label className="form-label font-bold text-slate-700">Pengajar Utama</label>
-                  <input
-                    type="text"
-                    className="form-input"
-                    placeholder="Nama Pengajar"
+                  <InstrukturSearchSelect
                     value={cPengajar}
-                    onChange={(e) => setCPengajar(e.target.value)}
+                    onChange={setCPengajar}
+                    instrukturList={instrukturList}
+                    placeholder="Ketik untuk cari instruktur..."
                     required
                   />
                 </div>
@@ -2392,11 +2630,14 @@ export default function JadwalManager({
               </div>
 
               <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
-                <button type="button" onClick={() => setShowCreateModal(false)} className="btn btn-outline btn-sm">
+                <button type="button" disabled={isGenerating} onClick={() => { setShowCreateModal(false); setEditingPackage(null); }} className="btn btn-outline btn-sm disabled:opacity-50">
                   Batal
                 </button>
-                <button type="submit" disabled={isGenerating} className="btn btn-primary btn-sm font-bold">
-                  {isGenerating ? 'Memproses...' : 'Buat Paket Jadwal'}
+                <button type="submit" disabled={isGenerating} className="btn btn-primary btn-sm font-bold flex items-center gap-1.5 disabled:opacity-75 disabled:cursor-not-allowed">
+                  {isGenerating && (
+                    <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  )}
+                  {isGenerating ? 'Memproses...' : (editingPackage ? 'Simpan Perubahan' : 'Buat Paket Jadwal')}
                 </button>
               </div>
             </form>
@@ -2412,6 +2653,32 @@ export default function JadwalManager({
           onStatusChange={loadData}
         />
       )}
+
+      <DeleteConfirmModal
+        open={Boolean(deleteTarget)}
+        title="Hapus Sesi?"
+        message="Anda yakin ingin menghapus sesi"
+        itemName={deleteTarget?.name || null}
+        loading={isDeleting}
+        onConfirm={confirmDeleteSession}
+        onCancel={() => {
+          if (!isDeleting) setDeleteTarget(null);
+        }}
+      />
+
+      <DeleteConfirmModal
+        open={Boolean(packageDeleteTarget)}
+        title="Hapus Paket Jadwal?"
+        message={`Anda yakin ingin menghapus paket "${packageDeleteTarget?.angkatan.nama_angkatan}" di ${packageDeleteTarget?.tempat_pelatihan}? (${packageDeleteTarget?.schedules.length || 0} sesi akan dihapus)`}
+        itemName={null}
+        loading={isDeleting}
+        onConfirm={confirmDeletePackageCard}
+        onCancel={() => {
+          if (!isDeleting) setPackageDeleteTarget(null);
+        }}
+      />
+
+      <ActionToast toast={actionToast} onClose={hideToast} />
     </div>
   );
 }

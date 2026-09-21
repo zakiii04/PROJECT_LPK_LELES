@@ -13,7 +13,7 @@ import type {
 import { mataPelajaranApi, nilaiApi, absensiApi } from '@/lib/api';
 import Pagination from '@/Components/Pagination';
 
-type SubTab = 'mata_pelajaran' | 'penilaian' | 'absensi_cetak';
+type SubTab = 'mata_pelajaran';
 
 interface AbsensiManagerProps {
   angkatanList: Angkatan[];
@@ -38,8 +38,6 @@ function nilaiGrade(n: number) {
 export default function AbsensiManager({ angkatanList, programList }: AbsensiManagerProps) {
   const [subTab, setSubTab] = useState<SubTab>('mata_pelajaran');
   const [mataPelajaranPage, setMataPelajaranPage] = useState(1);
-  const [penilaianPage, setPenilaianPage] = useState(1);
-  const [absensiPage, setAbsensiPage] = useState(1);
   const pageSize = 10;
 
   // ── Mata Pelajaran State ────────────────────────────────────────
@@ -54,26 +52,7 @@ export default function AbsensiManager({ angkatanList, programList }: AbsensiMan
   const [mpUrutan, setMpUrutan] = useState(0);
   const [filterMpProgram, setFilterMpProgram] = useState('');
 
-  // ── Penilaian State ─────────────────────────────────────────────
-  const [nilaiAngkatan, setNilaiAngkatan] = useState('');
-  const [nilaiProgram, setNilaiProgram] = useState('');
-  const [penilaianData, setPenilaianData] = useState<AbsensiData | null>(null);
-  const [penilaianLoading, setPenilaianLoading] = useState(false);
-  // localNilai: { [pendaftarId]: { [mapelId|'pretest'|'posttest'|'kehadiran']: number } }
-  const [localNilai, setLocalNilai] = useState<Record<string, Record<string, number>>>({});
-  const [savingNilai, setSavingNilai] = useState(false);
-  const [savedMsg, setSavedMsg] = useState('');
 
-  // ── Absensi Cetak State ─────────────────────────────────────────
-  const [absensiAngkatan, setAbsensiAngkatan] = useState('');
-  const [absensiProgram, setAbsensiProgram] = useState('');
-  const [absensiData, setAbsensiData] = useState<AbsensiData | null>(null);
-  const [absensiLoading, setAbsensiLoading] = useState(false);
-  const [jumlahKolHadir, setJumlahKolHadir] = useState(10);
-  const [namaInstruktur, setNamaInstruktur] = useState('');
-  const [tanggalMulai, setTanggalMulai] = useState('');
-  const [tanggalSelesai, setTanggalSelesai] = useState('');
-  const printRef = useRef<HTMLDivElement>(null);
 
   // ── Load Mata Pelajaran ─────────────────────────────────────────
   const loadMp = useCallback(async () => {
@@ -192,119 +171,90 @@ export default function AbsensiManager({ angkatanList, programList }: AbsensiMan
     window.print();
   }
 
-  // ── Derived helpers ─────────────────────────────────────────────
-  const selectedAngkatan = angkatanList.find((a) => a.id === absensiAngkatan);
-  const selectedProgram = programList.find((p) => p.id === absensiProgram);
 
-  // Mata pelajaran to show in the printable absensi
-  const mpForAbsensi = mpList.filter((mp) => !absensiProgram || !mp.program_id || mp.program_id === absensiProgram);
-  const mpForPenilaian = mpList.filter((mp) => !nilaiProgram || !mp.program_id || mp.program_id === nilaiProgram);
 
-  // ─────────────────────────────────────────────────────────────────
   return (
     <div className="space-y-6">
-      {/* Sub-tab navigation */}
-      <div className="flex gap-1 p-1 bg-slate-100 rounded-xl w-fit">
-        {([
-          { id: 'mata_pelajaran', label: '📚 Mata Pelajaran' },
-          { id: 'penilaian', label: '📝 Input Nilai' },
-          { id: 'absensi_cetak', label: '🖨️ Absensi & Cetak' },
-        ] as { id: SubTab; label: string }[]).map((t) => (
-          <button
-            key={t.id}
-            onClick={() => setSubTab(t.id)}
-            className={`px-4 py-2 text-xs font-bold rounded-lg transition-all ${subTab === t.id ? 'bg-white shadow text-[var(--primary)]' : 'text-slate-500 hover:text-slate-700'}`}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
-
-      {/* ═══════════════════════════════════════════════════
-          TAB 1 — MATA PELAJARAN
-      ═══════════════════════════════════════════════════ */}
-      {subTab === 'mata_pelajaran' && (
-        <div className="space-y-4">
-          <div className="flex items-center justify-between flex-wrap gap-3">
-            <div>
-              <h2 className="font-extrabold text-[var(--text-primary)] text-lg">Daftar Mata Pelajaran</h2>
-              <p className="text-xs text-[var(--text-tertiary)]">Kelola modul / mata pelajaran yang diajarkan pada setiap program pelatihan</p>
-            </div>
-            <div className="flex items-center gap-2">
-              <select
-                className="form-input text-xs py-1.5 px-3 w-auto"
-                value={filterMpProgram}
-                onChange={(e) => setFilterMpProgram(e.target.value)}
-              >
-                <option value="">Semua Program</option>
-                {programList.map((p) => <option key={p.id} value={p.id}>{p.nama}</option>)}
-              </select>
-              <button onClick={openAddMp} className="btn btn-primary btn-sm flex items-center gap-1.5">
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-                Tambah
-              </button>
-            </div>
+      <div className="space-y-4">
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <div>
+            <h2 className="font-extrabold text-[var(--text-primary)] text-lg">Daftar Mata Pelatihan</h2>
+            <p className="text-xs text-[var(--text-tertiary)]">Kelola modul / mata pelatihan yang diajarkan pada setiap program pelatihan</p>
           </div>
-
-          {mpLoading ? (
-            <div className="text-center py-10 text-sm text-[var(--text-tertiary)]">Memuat...</div>
-          ) : mpList.length === 0 ? (
-            <div className="text-center py-16 text-[var(--text-tertiary)]">
-              <svg className="w-12 h-12 mx-auto mb-3 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25"/></svg>
-              <p className="font-semibold">Belum ada mata pelajaran</p>
-              <p className="text-xs mt-1">Tambahkan mata pelajaran untuk memulai penilaian</p>
-            </div>
-          ) : (
-            <div className="overflow-x-auto rounded-xl border border-[var(--card-border)]">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="bg-slate-50 border-b border-[var(--card-border)]">
-                    <th className="text-left px-4 py-3 font-bold text-[var(--text-tertiary)] uppercase tracking-wider text-[10px]">#</th>
-                    <th className="text-left px-4 py-3 font-bold text-[var(--text-tertiary)] uppercase tracking-wider text-[10px]">Kode</th>
-                    <th className="text-left px-4 py-3 font-bold text-[var(--text-tertiary)] uppercase tracking-wider text-[10px]">Nama Mata Pelajaran</th>
-                    <th className="text-left px-4 py-3 font-bold text-[var(--text-tertiary)] uppercase tracking-wider text-[10px]">Program</th>
-                    <th className="text-left px-4 py-3 font-bold text-[var(--text-tertiary)] uppercase tracking-wider text-[10px]">Deskripsi</th>
-                    <th className="text-left px-4 py-3 font-bold text-[var(--text-tertiary)] uppercase tracking-wider text-[10px]">Urutan</th>
-                    <th className="text-center px-4 py-3 font-bold text-[var(--text-tertiary)] uppercase tracking-wider text-[10px]">Aksi</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-[var(--card-border)]">
-                  {mpList.slice((mataPelajaranPage - 1) * pageSize, mataPelajaranPage * pageSize).map((mp, idx) => {
-                    const prog = programList.find((p) => p.id === mp.program_id);
-                    return (
-                      <tr key={mp.id} className="hover:bg-slate-50/60 transition-colors">
-                        <td className="px-4 py-3 font-mono text-[var(--text-tertiary)]">{(mataPelajaranPage - 1) * pageSize + idx + 1}</td>
-                        <td className="px-4 py-3">
-                          <span className="font-mono font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-100">{mp.kode}</span>
-                        </td>
-                        <td className="px-4 py-3 font-bold text-[var(--text-primary)]">{mp.nama}</td>
-                        <td className="px-4 py-3 text-[var(--text-secondary)]">
-                          {prog ? (
-                            <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-100">{prog.nama}</span>
-                          ) : (
-                            <span className="text-[var(--text-tertiary)] italic">Semua Program</span>
-                          )}
-                        </td>
-                        <td className="px-4 py-3 text-[var(--text-secondary)] max-w-[200px] truncate">{mp.deskripsi || '-'}</td>
-                        <td className="px-4 py-3 text-center">
-                          <span className="font-mono text-[var(--text-tertiary)]">{mp.urutan}</span>
-                        </td>
-                        <td className="px-4 py-3">
-                          <div className="flex items-center justify-center gap-1.5">
-                            <button onClick={() => openEditMp(mp)} className="btn btn-outline btn-sm text-[10px] py-1 px-2">Edit</button>
-                            <button onClick={() => handleDeleteMp(mp.id)} className="btn btn-danger btn-sm text-[10px] py-1 px-2">Hapus</button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-              <Pagination currentPage={mataPelajaranPage} totalItems={mpList.length} pageSize={pageSize} onPageChange={setMataPelajaranPage} />
-            </div>
-          )}
+          <div className="flex items-center gap-2">
+            <select
+              className="form-input text-xs py-1.5 px-3 w-auto"
+              value={filterMpProgram}
+              onChange={(e) => setFilterMpProgram(e.target.value)}
+            >
+              <option value="">Semua Program</option>
+              {programList.map((p) => <option key={p.id} value={p.id}>{p.nama}</option>)}
+            </select>
+            <button onClick={openAddMp} className="btn btn-primary btn-sm flex items-center gap-1.5">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              Tambah
+            </button>
+          </div>
         </div>
-      )}
+
+        {mpLoading ? (
+          <div className="text-center py-10 text-sm text-[var(--text-tertiary)]">Memuat...</div>
+        ) : mpList.length === 0 ? (
+          <div className="text-center py-16 text-[var(--text-tertiary)]">
+            <svg className="w-12 h-12 mx-auto mb-3 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25"/></svg>
+            <p className="font-semibold">Belum ada mata pelatihan</p>
+            <p className="text-xs mt-1">Tambahkan mata pelatihan untuk digunakan dalam program pelatihan</p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto rounded-xl border border-[var(--card-border)]">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="bg-slate-50 border-b border-[var(--card-border)]">
+                  <th className="text-left px-4 py-3 font-bold text-[var(--text-tertiary)] uppercase tracking-wider text-[10px]">#</th>
+                  <th className="text-left px-4 py-3 font-bold text-[var(--text-tertiary)] uppercase tracking-wider text-[10px]">Kode</th>
+                  <th className="text-left px-4 py-3 font-bold text-[var(--text-tertiary)] uppercase tracking-wider text-[10px]">Nama Mata Pelatihan</th>
+                  <th className="text-left px-4 py-3 font-bold text-[var(--text-tertiary)] uppercase tracking-wider text-[10px]">Program</th>
+                  <th className="text-left px-4 py-3 font-bold text-[var(--text-tertiary)] uppercase tracking-wider text-[10px]">Deskripsi</th>
+                  <th className="text-left px-4 py-3 font-bold text-[var(--text-tertiary)] uppercase tracking-wider text-[10px]">Urutan</th>
+                  <th className="text-center px-4 py-3 font-bold text-[var(--text-tertiary)] uppercase tracking-wider text-[10px]">Aksi</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[var(--card-border)]">
+                {mpList.slice((mataPelajaranPage - 1) * pageSize, mataPelajaranPage * pageSize).map((mp, idx) => {
+                  const prog = programList.find((p) => p.id === mp.program_id);
+                  return (
+                    <tr key={mp.id} className="hover:bg-slate-50/60 transition-colors">
+                      <td className="px-4 py-3 font-mono text-[var(--text-tertiary)]">{(mataPelajaranPage - 1) * pageSize + idx + 1}</td>
+                      <td className="px-4 py-3">
+                        <span className="font-mono font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-100">{mp.kode}</span>
+                      </td>
+                      <td className="px-4 py-3 font-bold text-[var(--text-primary)]">{mp.nama}</td>
+                      <td className="px-4 py-3 text-[var(--text-secondary)]">
+                        {prog ? (
+                          <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-100">{prog.nama}</span>
+                        ) : (
+                          <span className="text-[var(--text-tertiary)] italic">Semua Program</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-[var(--text-secondary)] max-w-[200px] truncate">{mp.deskripsi || '-'}</td>
+                      <td className="px-4 py-3 text-center">
+                        <span className="font-mono text-[var(--text-tertiary)]">{mp.urutan}</span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center justify-center gap-1.5">
+                          <button onClick={() => openEditMp(mp)} className="btn btn-outline btn-sm text-[10px] py-1 px-2">Edit</button>
+                          <button onClick={() => handleDeleteMp(mp.id)} className="btn btn-danger btn-sm text-[10px] py-1 px-2">Hapus</button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            <Pagination currentPage={mataPelajaranPage} totalItems={mpList.length} pageSize={pageSize} onPageChange={setMataPelajaranPage} />
+          </div>
+        )}
+      </div>
 
       {/* ═══════════════════════════════════════════════════
           TAB 2 — PENILAIAN

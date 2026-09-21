@@ -4,55 +4,83 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { router } from '@inertiajs/react';
 import Navbar from '@/Components/Navbar';
 import AdminPendaftarTable from '@/Components/AdminPendaftarTable';
-import AdminPendaftarDetail from '@/Components/AdminPendaftarDetail';
 import AngkatanManager from '@/Components/AngkatanManager';
 import PelatihanManager from '@/Components/PelatihanManager';
 import TempatManager from '@/Components/TempatManager';
+import InstrukturManager from '@/Components/InstrukturManager';
 import CalendarView from '@/Components/CalendarView';
 import GraduationManager from '@/Components/GraduationManager';
 import JadwalManager from '@/Components/JadwalManager';
 import PaymentMethodManager from '@/Components/PaymentMethodManager';
-import AbsensiManager from '@/Components/AbsensiManager';
+import MataPelatihanManager from '@/Components/MataPelatihanManager';
+import InstrukturSearchSelect from '@/Components/InstrukturSearchSelect';
 import Pagination from '@/Components/Pagination';
 import {
   type Pendaftar,
-  type Cicilan,
   type JadwalPelatihan,
   type SoalUjian,
   type Program,
   type Angkatan,
+  getStatusValidasi,
+  getStatusVerifikasi,
+  getTahapLabel,
+  getTahapBadgeClass,
 } from '@/lib/storage';
 import {
   pendaftarApi,
   jadwalApi,
   soalApi,
-  cicilanApi,
   pembayaranApi,
   programApi,
   angkatanApi,
+  instrukturApi,
 } from '@/lib/api';
 import { getToken } from '@/lib/axios';
-import type { Pembayaran } from '@/lib/types';
+import type { Pembayaran, Instruktur } from '@/lib/types';
+import { groupJadwalToKelas } from '@/lib/kelas';
 
 type AdminTab =
   | 'overview'
   | 'validasi_peserta'
+  | 'verifikasi_peserta'
   | 'semua_peserta'
   | 'validasi_pembayaran'
+  | 'kelola_program'
+  | 'kelola_tempat'
+  | 'kelola_instruktur'
   | 'kelola_pelatihan'
   | 'kelola_angkatan'
-  | 'kelola_tempat'
+  | 'kelola_kelas'
   | 'kelola_jadwal'
+  | 'kelola_penilaian'
   | 'kelola_metode_pembayaran'
   | 'kelola_ujian'
   | 'kelola_kelulusan'
-  | 'absensi_penilaian';
+  | 'mata_pelajaran';
 
-type FilterStatus = 'semua' | 'menunggu' | 'diterima' | 'ditolak';
+interface SidebarChild {
+  id: AdminTab;
+  label: string;
+  badge?: number | null;
+  badgeColor?: string;
+}
+
+interface SidebarItem {
+  id: AdminTab;
+  label: string;
+  icon: React.ReactNode;
+  badge?: number | null;
+  badgeColor?: string;
+  children?: SidebarChild[];
+}
+
+const PELATIHAN_CHILDREN: AdminTab[] = ['kelola_pelatihan', 'kelola_angkatan', 'kelola_kelas', 'kelola_jadwal', 'kelola_penilaian'];
+
+type FilterStatus = 'semua' | 'menunggu' | 'diterima' | 'ditolak' | 'lulus' | 'sudah_bekerja' | 'keluar';
 
 import ManualRegisterModal from '@/Components/ManualRegisterModal';
 import DeleteConfirmModal from '@/Components/DeleteConfirmModal';
-import VerifikasiPesertaModal from '@/Components/VerifikasiPesertaModal';
+import AdminPendaftarDetail, { type DetailMode } from '@/Components/AdminPendaftarDetail';
 import PaymentDetailModal from '@/Components/PaymentDetailModal';
 import ActionToast, { useActionToast } from '@/Components/ActionToast';
 
@@ -63,6 +91,7 @@ interface AdminDashboardProps {
   initialProgramList?: Program[];
   initialAngkatanList?: Angkatan[];
   initialTempatList?: TempatPelatihan[];
+  initialInstrukturList?: Instruktur[];
   initialPaymentMethods?: PaymentMethod[];
 }
 
@@ -74,8 +103,13 @@ export default function AdminDashboardPage(props: AdminDashboardProps) {
   const [filter, setFilter] = useState<FilterStatus>('semua');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedPendaftar, setSelectedPendaftar] = useState<Pendaftar | null>(null);
+  const [detailMode, setDetailMode] = useState<DetailMode>('semua');
+  const openDetail = (p: Pendaftar, mode: DetailMode) => {
+    setSelectedPendaftar(p);
+    setDetailMode(mode);
+  };
+  const closeDetail = () => setSelectedPendaftar(null);
   const [selectedPaymentDetail, setSelectedPaymentDetail] = useState<{ pendaftar: Pendaftar; pembayaran: Pembayaran } | null>(null);
-  const [verifikasiPendaftar, setVerifikasiPendaftar] = useState<Pendaftar | null>(null);
   const [isAuthed, setIsAuthed] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string; type: 'pendaftar' | 'jadwal' | 'soal' } | null>(null);
   const { actionToast, showLoading, showSuccess, showError, hideToast } = useActionToast();
@@ -168,8 +202,10 @@ export default function AdminDashboardPage(props: AdminDashboardProps) {
   const [sJawabanBenar, setSJawabanBenar] = useState(0);
   const [sGambarFile, setSGambarFile] = useState<File | null>(null);
   const [sGambarPreview, setSGambarPreview] = useState<string | null>(null);
+  const [sIsActive, setSIsActive] = useState(true);
 
   const [filterSoalTipe, setFilterSoalTipe] = useState<'semua' | 'pretest' | 'posttest'>('semua');
+  const [filterSoalStatus, setFilterSoalStatus] = useState<'semua' | 'aktif' | 'nonaktif'>('semua');
 
   // Pagination state
   const [validasiPage, setValidasiPage] = useState(1);
@@ -220,6 +256,7 @@ export default function AdminDashboardPage(props: AdminDashboardProps) {
     setSJawabanBenar(0);
     setSGambarFile(null);
     setSGambarPreview(null);
+    setSIsActive(true);
     setShowAddSoalModal(true);
   };
 
@@ -235,7 +272,26 @@ export default function AdminDashboardPage(props: AdminDashboardProps) {
     setSJawabanBenar(soal.jawaban_benar);
     setSGambarFile(null);
     setSGambarPreview(soal.gambar_soal || null);
+    setSIsActive(soal.is_active ?? true);
     setShowAddSoalModal(true);
+  };
+
+  const handleToggleSoalStatus = async (soal: SoalUjian) => {
+    try {
+      const next = !(soal.is_active ?? true);
+      await soalApi.updateStatus(soal.id, next);
+      await loadData();
+      showSuccess(
+        'edit',
+        next ? 'Soal Diaktifkan!' : 'Soal Dinonaktifkan!',
+        next
+          ? 'Soal akan muncul kembali pada ujian peserta.'
+          : 'Soal tidak akan muncul pada ujian peserta.'
+      );
+    } catch (err: any) {
+      console.error('Error toggling soal status:', err);
+      showError('Gagal Mengubah Status Soal', err?.message || 'Terjadi kesalahan sistem.');
+    }
   };
 
   // Handler Submit Soal (Tambah / Edit)
@@ -259,6 +315,7 @@ export default function AdminDashboardPage(props: AdminDashboardProps) {
         opsi: [sOpsiA, sOpsiB, sOpsiC, sOpsiD],
         jawaban_benar: Number(sJawabanBenar),
         gambar_soal: sGambarFile || undefined,
+        is_active: sIsActive,
       };
 
       if (editingSoal) {
@@ -291,16 +348,27 @@ export default function AdminDashboardPage(props: AdminDashboardProps) {
   };
 
   const [programList, setProgramList] = useState<Program[]>(props.initialProgramList || []);
+  const [instrukturList, setInstrukturList] = useState<Instruktur[]>(props.initialInstrukturList || []);
+  const [expandedPelatihan, setExpandedPelatihan] = useState(false);
+
+  // Auto-buka dropdown saat navigasi masuk ke grup pelatihan (mis. via kartu hub),
+  // tapi tetap bisa ditutup manual karena tidak dipaksa terbuka via OR activeTab.
+  useEffect(() => {
+    if (PELATIHAN_CHILDREN.includes(activeTab)) {
+      setExpandedPelatihan(true);
+    }
+  }, [activeTab]);
 
   const loadData = useCallback(async (silent = false) => {
     if (!silent) setIsDataRefreshing(true);
     try {
-      const [pendaftarRes, jadwalRes, soalRes, prgRes, angkRes] = await Promise.all([
+      const [pendaftarRes, jadwalRes, soalRes, prgRes, angkRes, insRes] = await Promise.all([
         pendaftarApi.list({ per_page: 1000 }),
         jadwalApi.list(),
         soalApi.list(),
         programApi.list(),
         angkatanApi.list(),
+        instrukturApi.list(),
       ]);
 
       if (pendaftarRes.success && pendaftarRes.data) {
@@ -326,6 +394,10 @@ export default function AdminDashboardPage(props: AdminDashboardProps) {
 
       if (angkRes.success && angkRes.data) {
         setAngkatanList(angkRes.data);
+      }
+
+      if (insRes.success && insRes.data) {
+        setInstrukturList(insRes.data);
       }
     } catch (error) {
       console.error('[Admin Dashboard loadData error]:', error);
@@ -356,7 +428,10 @@ export default function AdminDashboardPage(props: AdminDashboardProps) {
     if (props.initialAngkatanList && props.initialAngkatanList.length > 0) {
       setAngkatanList(props.initialAngkatanList);
     }
-  }, [props.initialPendaftarList, props.initialJadwalList, props.initialSoalList, props.initialProgramList, props.initialAngkatanList]);
+    if (props.initialInstrukturList && props.initialInstrukturList.length > 0) {
+      setInstrukturList(props.initialInstrukturList);
+    }
+  }, [props.initialPendaftarList, props.initialJadwalList, props.initialSoalList, props.initialProgramList, props.initialAngkatanList, props.initialInstrukturList]);
 
   if (!isMounted) {
     return null;
@@ -490,13 +565,15 @@ export default function AdminDashboardPage(props: AdminDashboardProps) {
     );
   }
 
-  // Filtered & searched lists
-  const pendingValidationList = pendaftarList.filter((p) => p.status === 'menunggu');
+  // Filtered & searched lists — alur 2 tahap
+  const pendingValidationList = pendaftarList.filter((p) => getStatusValidasi(p) === 'menunggu' && p.status !== 'ditolak');
+  const pendingVerifikasiList = pendaftarList.filter(
+    (p) => getStatusValidasi(p) === 'diterima' && (getStatusVerifikasi(p) === 'menunggu' || getStatusVerifikasi(p) === 'belum_proses')
+  );
   const pendingPaymentList = pendaftarList.filter(
-    (p) => p.status === 'diterima' && (
+    (p) => (p.status === 'diterima' || p.status === 'lulus' || p.status === 'sudah_bekerja') && (
       p.tagihan?.pembayarans?.some((payment) => payment.status === 'menunggu_verifikasi') ||
-      p.status_pembayaran === 'menunggu_konfirmasi' ||
-      (p.status_pembayaran === 'cicilan_sebagian' && p.cicilan?.some(c => c.status === 'menunggu_konfirmasi'))
+      p.status_pembayaran === 'menunggu_konfirmasi'
     )
   );
 
@@ -548,9 +625,14 @@ export default function AdminDashboardPage(props: AdminDashboardProps) {
 
   const stats = {
     total: pendaftarList.length,
-    menunggu: pendingValidationList.length,
+    menunggu: pendingValidationList.length + pendingVerifikasiList.length,
+    menungguValidasi: pendingValidationList.length,
+    menungguVerifikasi: pendingVerifikasiList.length,
     diterima: pendaftarList.filter((p) => p.status === 'diterima').length,
     ditolak: pendaftarList.filter((p) => p.status === 'ditolak').length,
+    lulus: pendaftarList.filter((p) => p.status === 'lulus').length,
+    sudah_bekerja: pendaftarList.filter((p) => p.status === 'sudah_bekerja').length,
+    keluar: pendaftarList.filter((p) => p.status === 'keluar').length,
     menungguBayar: pendingPaymentList.length,
     lunas: pendaftarList.filter((p) => p.status_pembayaran === 'lunas').length,
   };
@@ -619,12 +701,12 @@ export default function AdminDashboardPage(props: AdminDashboardProps) {
             </button>
           </div>
 
-          {[
+          {([
             {
               sectionTitle: 'UTAMA',
               items: [
                 {
-                  id: 'overview',
+                  id: 'overview' as AdminTab,
                   label: 'Overview',
                   icon: (
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -634,16 +716,16 @@ export default function AdminDashboardPage(props: AdminDashboardProps) {
                       <rect x="3" y="14" width="7" height="7" />
                     </svg>
                   ),
-                  badge: null,
+                  badge: null as number | null,
                 },
-              ],
+              ] as SidebarItem[],
             },
             {
               sectionTitle: 'MANAJEMEN PESERTA',
               items: [
                 {
-                  id: 'validasi_peserta',
-                  label: 'Validasi Peserta',
+                  id: 'validasi_peserta' as AdminTab,
+                  label: 'Validasi Awal (Tahap 1)',
                   icon: (
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
@@ -651,11 +733,23 @@ export default function AdminDashboardPage(props: AdminDashboardProps) {
                       <polyline points="16 11 18 13 22 9" />
                     </svg>
                   ),
-                  badge: stats.menunggu > 0 ? stats.menunggu : null,
+                  badge: stats.menungguValidasi > 0 ? stats.menungguValidasi : null,
                   badgeColor: 'bg-amber-500 text-white',
                 },
                 {
-                  id: 'semua_peserta',
+                  id: 'verifikasi_peserta' as AdminTab,
+                  label: 'Verifikasi (Tahap 2)',
+                  icon: (
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M9 11l3 3L22 4" />
+                      <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+                    </svg>
+                  ),
+                  badge: stats.menungguVerifikasi > 0 ? stats.menungguVerifikasi : null,
+                  badgeColor: 'bg-indigo-600 text-white',
+                },
+                {
+                  id: 'semua_peserta' as AdminTab,
                   label: 'Semua Peserta',
                   icon: (
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -669,7 +763,7 @@ export default function AdminDashboardPage(props: AdminDashboardProps) {
                   badgeColor: 'bg-slate-200 text-slate-700',
                 },
                 {
-                  id: 'validasi_pembayaran',
+                  id: 'validasi_pembayaran' as AdminTab,
                   label: 'Validasi Pembayaran',
                   icon: (
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -680,62 +774,8 @@ export default function AdminDashboardPage(props: AdminDashboardProps) {
                   badge: stats.menungguBayar > 0 ? stats.menungguBayar : null,
                   badgeColor: 'bg-indigo-600 text-white',
                 },
-              ],
-            },
-            {
-              sectionTitle: 'AKADEMIK & EVALUASI',
-              items: [
                 {
-                  id: 'kelola_pelatihan',
-                  label: 'Kelola Program',
-                  icon: (
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M22 10v6M2 10l10-5 10 5-10 5z" />
-                      <path d="M6 12v5c3 3 12 3 12 0v-5" />
-                    </svg>
-                  ),
-                  badge: null,
-                },
-                {
-                  id: 'kelola_angkatan',
-                  label: 'Kelola Angkatan',
-                  icon: (
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-                      <circle cx="9" cy="7" r="4" />
-                      <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-                      <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-                    </svg>
-                  ),
-                  badge: null,
-                },
-                {
-                  id: 'kelola_tempat',
-                  label: 'Kelola Tempat',
-                  icon: (
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z" />
-                      <circle cx="12" cy="10" r="3" />
-                    </svg>
-                  ),
-                  badge: null,
-                },
-                {
-                  id: 'kelola_jadwal',
-                  label: 'Kelola Jadwal',
-                  icon: (
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
-                      <line x1="16" y1="2" x2="16" y2="6" />
-                      <line x1="8" y1="2" x2="8" y2="6" />
-                      <line x1="3" y1="10" x2="21" y2="10" />
-                    </svg>
-                  ),
-                  badge: jadwalList.length,
-                  badgeColor: 'bg-blue-100 text-blue-700',
-                },
-                {
-                  id: 'kelola_metode_pembayaran',
+                  id: 'kelola_metode_pembayaran' as AdminTab,
                   label: 'Metode Pembayaran',
                   icon: (
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -743,10 +783,59 @@ export default function AdminDashboardPage(props: AdminDashboardProps) {
                       <line x1="2" y1="10" x2="22" y2="10" />
                     </svg>
                   ),
-                  badge: null,
+                  badge: null as number | null,
+                },
+              ] as SidebarItem[],
+            },
+            {
+              sectionTitle: 'PROGRAM & TEMPAT',
+              items: [
+                {
+                  id: 'kelola_program' as AdminTab,
+                  label: 'Kelola Program',
+                  icon: (
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M22 10v6M2 10l10-5 10 5-10 5z" />
+                      <path d="M6 12v5c3 3 12 3 12 0v-5" />
+                    </svg>
+                  ),
+                  badge: null as number | null,
                 },
                 {
-                  id: 'kelola_ujian',
+                  id: 'kelola_tempat' as AdminTab,
+                  label: 'Kelola Tempat',
+                  icon: (
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z" />
+                      <circle cx="12" cy="10" r="3" />
+                    </svg>
+                  ),
+                  badge: null as number | null,
+                },
+              ] as SidebarItem[],
+            },
+            {
+              sectionTitle: 'AKADEMIK',
+              items: [
+                {
+                  id: 'kelola_pelatihan' as AdminTab,
+                  label: 'Kelola Pelatihan',
+                  icon: (
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+                      <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+                    </svg>
+                  ),
+                  badge: null as number | null,
+                  children: [
+                    { id: 'kelola_angkatan' as AdminTab, label: 'Kelola Angkatan', badge: angkatanList.length > 0 ? angkatanList.length : null, badgeColor: 'bg-slate-200 text-slate-700' },
+                    { id: 'kelola_kelas' as AdminTab, label: 'Kelola Kelas', badge: groupJadwalToKelas(jadwalList, angkatanList, props.initialTempatList || []).length || null, badgeColor: 'bg-emerald-100 text-emerald-700' },
+                    { id: 'kelola_jadwal' as AdminTab, label: 'Kelola Jadwal', badge: jadwalList.length > 0 ? jadwalList.length : null, badgeColor: 'bg-blue-100 text-blue-700' },
+                    { id: 'kelola_penilaian' as AdminTab, label: 'Kelola Penilaian', badge: null as number | null },
+                  ],
+                },
+                {
+                  id: 'kelola_ujian' as AdminTab,
                   label: 'Pretest & Posttest',
                   icon: (
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -761,7 +850,7 @@ export default function AdminDashboardPage(props: AdminDashboardProps) {
                   badgeColor: 'bg-indigo-100 text-indigo-700',
                 },
                 {
-                  id: 'kelola_kelulusan',
+                  id: 'kelola_kelulusan' as AdminTab,
                   label: 'Kelulusan & Sertifikat',
                   icon: (
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -769,11 +858,11 @@ export default function AdminDashboardPage(props: AdminDashboardProps) {
                       <polyline points="8.21 13.89 7 23 12 20 17 23 15.79 13.88" />
                     </svg>
                   ),
-                  badge: null,
+                  badge: null as number | null,
                 },
                 {
-                  id: 'absensi_penilaian',
-                  label: 'Absensi & Penilaian',
+                  id: 'mata_pelajaran' as AdminTab,
+                  label: 'Mata Pelatihan',
                   icon: (
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/>
@@ -782,38 +871,101 @@ export default function AdminDashboardPage(props: AdminDashboardProps) {
                       <line x1="9" y1="16" x2="13" y2="16"/>
                     </svg>
                   ),
-                  badge: null,
+                  badge: null as number | null,
                 },
-              ],
+                {
+                  id: 'kelola_instruktur' as AdminTab,
+                  label: 'Kelola Instruktur',
+                  icon: (
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                      <circle cx="9" cy="7" r="4" />
+                      <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+                      <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+                    </svg>
+                  ),
+                  badge: instrukturList.length > 0 ? instrukturList.length : null,
+                  badgeColor: 'bg-emerald-100 text-emerald-700',
+                },
+              ] as SidebarItem[],
             },
-          ].map((group, gIdx) => (
+          ]).map((group, gIdx) => {
+            const isPelatihanGroup = group.items.some((i) => i.id === 'kelola_pelatihan');
+            const pelatihanOpen = expandedPelatihan;
+            return (
             <div key={gIdx} className="space-y-1">
               <div className="flex items-center justify-between px-2 text-[10px] font-extrabold uppercase tracking-wider text-slate-400 mb-1 mt-3">
                 <span>{group.sectionTitle}</span>
                 <span className="text-slate-300 font-normal">+</span>
               </div>
-              {group.items.map((item) => (
-                <button
-                  key={item.id}
-                  onClick={() => {
-                    setActiveTab(item.id as AdminTab);
-                    setSelectedPendaftar(null);
-                    setVerifikasiPendaftar(null);
-                    setSidebarOpen(false);
-                  }}
-                  className={`sidebar-link ${activeTab === item.id ? 'active' : ''}`}
-                >
-                  <div className="icon-box">{item.icon}</div>
-                  <span className="flex-1 text-xs">{item.label}</span>
-                  {item.badge !== null && (
-                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${item.badgeColor}`}>
-                      {item.badge}
-                    </span>
-                  )}
-                </button>
-              ))}
+              {group.items.map((item) => {
+                const hasChildren = Boolean(item.children?.length);
+                const showChildren = hasChildren && (isPelatihanGroup ? pelatihanOpen : true);
+                const isParentActive = hasChildren && PELATIHAN_CHILDREN.includes(activeTab);
+                return (
+                <div key={item.id}>
+                  <button
+                    onClick={() => {
+                      if (hasChildren && isPelatihanGroup) {
+                        // Toggle buka/tutup. Saat menutup, jangan pindah tab
+                        // agar tidak langsung terbuka lagi. Saat membuka dari
+                        // luar grup, navigasi ke halaman hub pelatihan.
+                        if (pelatihanOpen) {
+                          setExpandedPelatihan(false);
+                          setSidebarOpen(false);
+                          return;
+                        }
+                        setExpandedPelatihan(true);
+                        if (!PELATIHAN_CHILDREN.includes(activeTab)) {
+                          setActiveTab(item.id);
+                          setSelectedPendaftar(null);
+                        }
+                        setSidebarOpen(false);
+                        return;
+                      }
+                      setActiveTab(item.id);
+                      setSelectedPendaftar(null);
+                      setSidebarOpen(false);
+                    }}
+                    className={`sidebar-link ${activeTab === item.id || isParentActive ? 'active' : ''}`}
+                  >
+                    <div className="icon-box">{item.icon}</div>
+                    <span className="flex-1 text-xs">{item.label}</span>
+                    {item.badge != null && (
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${item.badgeColor ?? 'bg-slate-200 text-slate-700'}`}>
+                        {item.badge}
+                      </span>
+                    )}
+                    {hasChildren && (
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform ${showChildren ? 'rotate-180' : ''}`}>
+                        <polyline points="6 9 12 15 18 9" />
+                      </svg>
+                    )}
+                  </button>
+                  {showChildren && item.children?.map((child) => (
+                    <button
+                      key={child.id}
+                      onClick={() => {
+                        setActiveTab(child.id);
+                        setSelectedPendaftar(null);
+                        setSidebarOpen(false);
+                      }}
+                      className={`sidebar-link ml-5 pl-3 border-l-2 ${activeTab === child.id ? 'active border-indigo-500' : 'border-slate-200'}`}
+                    >
+                      <span className="flex-1 text-xs">{child.label}</span>
+                      {child.badge != null && (
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${child.badgeColor ?? 'bg-slate-200 text-slate-700'}`}>
+                          {child.badge}
+                        </span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+                );
+              })}
             </div>
-          ))}
+            );
+          })}
         </div>
 
         {/* Sidebar Bottom Action */}
@@ -888,13 +1040,18 @@ export default function AdminDashboardPage(props: AdminDashboardProps) {
 
         {/* Content Body according to Active Tab */}
         <main className="flex-1 p-6 md:p-8 space-y-6 overflow-y-auto">
-          {(selectedPendaftar || verifikasiPendaftar) ? (
+          {selectedPendaftar ? (
             <AdminPendaftarDetail
-              pendaftar={selectedPendaftar || verifikasiPendaftar!}
-              onClose={() => {
-                setSelectedPendaftar(null);
-                setVerifikasiPendaftar(null);
-              }}
+              pendaftar={selectedPendaftar}
+              mode={detailMode}
+              backLabel={
+                detailMode === 'validasi'
+                  ? 'Kembali ke Validasi Awal'
+                  : detailMode === 'verifikasi'
+                    ? 'Kembali ke Verifikasi'
+                    : 'Kembali ke Daftar Peserta'
+              }
+              onClose={closeDetail}
               onStatusChange={handleStatusChange}
             />
           ) : (
@@ -902,7 +1059,7 @@ export default function AdminDashboardPage(props: AdminDashboardProps) {
               {/* TAB 1: OVERVIEW */}
               {activeTab === 'overview' && (
                 <div className="space-y-6 animate-fade-in">
-                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                  <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
                     <StatCard
                       label="Total Pendaftar"
                       value={stats.total}
@@ -918,14 +1075,26 @@ export default function AdminDashboardPage(props: AdminDashboardProps) {
                       }
                     />
                     <StatCard
-                      label="Menunggu Validasi"
-                      value={stats.menunggu}
+                      label="Tahap 1: Validasi"
+                      value={stats.menungguValidasi}
                       color="#d97706"
                       bgColor="rgba(217,119,6,0.1)"
                       icon={
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                           <circle cx="12" cy="12" r="10" />
                           <polyline points="12 6 12 12 16 14" />
+                        </svg>
+                      }
+                    />
+                    <StatCard
+                      label="Tahap 2: Verifikasi"
+                      value={stats.menungguVerifikasi}
+                      color="#4f46e5"
+                      bgColor="rgba(79,70,229,0.1)"
+                      icon={
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M9 11l3 3L22 4" />
+                          <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
                         </svg>
                       }
                     />
@@ -956,7 +1125,7 @@ export default function AdminDashboardPage(props: AdminDashboardProps) {
                   </div>
 
                   {/* Quick Action Alerts */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div className="glass-card-static p-6 flex flex-col justify-between border-l-4 border-l-amber-500">
                       <div>
                         <div className="flex items-center gap-2 text-amber-700 font-bold mb-2">
@@ -967,17 +1136,40 @@ export default function AdminDashboardPage(props: AdminDashboardProps) {
                               <line x1="12" y1="17" x2="12.01" y2="17" />
                             </svg>
                           </div>
-                          <span>Validasi Peserta Baru ({stats.menunggu})</span>
+                          <span>Tahap 1: Validasi Awal ({stats.menungguValidasi})</span>
                         </div>
                         <p className="text-xs text-[var(--text-secondary)] leading-relaxed">
-                          Ada {stats.menunggu} calon peserta yang baru mendaftar dan membutuhkan peninjauan berkas serta persetujuan status pendaftaran.
+                          Ada {stats.menungguValidasi} pendaftar baru menunggu filter awal: cek jenis kelamin khusus perempuan & keaslian data. Lolos → masuk Tahap 2 Verifikasi.
                         </p>
                       </div>
                       <button
                         onClick={() => setActiveTab('validasi_peserta')}
                         className="btn btn-primary btn-sm mt-4 self-start flex items-center gap-1.5"
                       >
-                        Buka Validasi Peserta
+                        Buka Validasi Awal
+                      </button>
+                    </div>
+
+                    <div className="glass-card-static p-6 flex flex-col justify-between border-l-4 border-l-indigo-600">
+                      <div>
+                        <div className="flex items-center gap-2 text-indigo-700 font-bold mb-2">
+                          <div className="w-6 h-6 rounded-md bg-indigo-100 flex items-center justify-center text-indigo-600">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M9 11l3 3L22 4" />
+                              <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+                            </svg>
+                          </div>
+                          <span>Tahap 2: Verifikasi ({stats.menungguVerifikasi})</span>
+                        </div>
+                        <p className="text-xs text-[var(--text-secondary)] leading-relaxed">
+                          Ada {stats.menungguVerifikasi} pendaftar lolos validasi dan menunggu verifikasi berkas + fisik. Diterima → masuk angkatan, jadwal, status diterima.
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => setActiveTab('verifikasi_peserta')}
+                        className="btn btn-accent btn-sm mt-4 self-start flex items-center gap-1.5"
+                      >
+                        Buka Verifikasi
                       </button>
                     </div>
 
@@ -1016,25 +1208,102 @@ export default function AdminDashboardPage(props: AdminDashboardProps) {
                         Lihat Semua ({stats.total})
                       </button>
                     </div>
-                    <AdminPendaftarTable data={pendaftarList.slice(0, 5)} onViewDetail={setSelectedPendaftar} />
+                    <AdminPendaftarTable data={pendaftarList.slice(0, 5)} onViewDetail={(p) => openDetail(p, 'semua')} />
                   </div>
                 </div>
               )}
 
-              {/* TAB 2: VALIDASI PESERTA (MENUNGGU) */}
+              {/* TAB 2: TAHAP 1 — VALIDASI AWAL */}
               {activeTab === 'validasi_peserta' && (
                 <div className="glass-card-static p-6 animate-fade-in space-y-4">
                   <div className="flex items-center justify-between pb-4 border-b border-[var(--card-border)]">
                     <div>
-                      <h2 className="text-lg font-bold text-[var(--text-primary)]">Validasi Peserta Baru</h2>
-                      <p className="text-xs text-[var(--text-secondary)]">Daftar calon peserta yang menunggu persetujuan Admin</p>
+                      <h2 className="text-lg font-bold text-[var(--text-primary)]">Tahap 1 — Validasi Awal</h2>
+                      <p className="text-xs text-[var(--text-secondary)]">Filter pendaftar baru: khusus perempuan & pastikan bukan asal daftar. Lolos → masuk Tahap 2 Verifikasi.</p>
                     </div>
-                    <span className="badge badge-pending">{pendingValidationList.length} Menunggu</span>
+                    <span className="badge badge-pending">{pendingValidationList.length} Menunggu validasi</span>
                   </div>
 
                   {pendingValidationList.length === 0 ? (
                     <div className="text-center py-12 text-[var(--text-tertiary)] text-sm">
-                      Tidak ada peserta yang menunggu validasi. Semua data telah diproses.
+                      Tidak ada pendaftar menunggu validasi. Semua data tahap awal telah diproses.
+                    </div>
+                  ) : (
+                    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xs">
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left text-xs border-collapse">
+                          <thead>
+                            <tr className="bg-slate-50/80 border-b border-slate-200 text-slate-500 font-semibold uppercase tracking-wider text-[11px]">
+                              <th className="py-3.5 px-4">No. Registrasi</th>
+                              <th className="py-3.5 px-4">Nama & NIK</th>
+                              <th className="py-3.5 px-4">Jenis Kelamin</th>
+                              <th className="py-3.5 px-4">Program & HP</th>
+                              <th className="py-3.5 px-4 text-center">Tahap</th>
+                              <th className="py-3.5 px-4 text-right">Aksi Validasi</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100 text-slate-700">
+                            {pendingValidationList.slice((validasiPage - 1) * PAGE_SIZE, validasiPage * PAGE_SIZE).map((pendaftar) => (
+                              <tr key={pendaftar.id} className="hover:bg-slate-50/60 transition-colors">
+                                <td className="py-3.5 px-4">
+                                  <span className="font-mono font-bold text-indigo-600 block text-xs">{pendaftar.no_pendaftaran}</span>
+                                  <span className="text-[11px] text-slate-400 font-normal">
+                                    {new Date(pendaftar.tanggal_daftar).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}
+                                  </span>
+                                </td>
+                                <td className="py-3.5 px-4">
+                                  <span className="font-bold text-slate-800 text-sm block">{pendaftar.nama_lengkap}</span>
+                                  <span className="font-mono text-[11px] text-slate-500">NIK: {pendaftar.nik}</span>
+                                </td>
+                                <td className="py-3.5 px-4">
+                                  <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${pendaftar.jenis_kelamin === 'Laki-laki' ? 'bg-rose-50 text-rose-700 border-rose-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'}`}>
+                                    {pendaftar.jenis_kelamin || '-'}
+                                  </span>
+                                </td>
+                                <td className="py-3.5 px-4">
+                                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-indigo-50 text-indigo-700 mb-1 border border-indigo-100">
+                                    {pendaftar.jenis_pelatihan}
+                                  </span>
+                                  <span className="block text-[11px] text-slate-500 font-medium">HP: {pendaftar.no_hp}</span>
+                                </td>
+                                <td className="py-3.5 px-4 text-center">
+                                  <span className={getTahapBadgeClass(pendaftar)}>{getTahapLabel(pendaftar)}</span>
+                                </td>
+                                <td className="py-3.5 px-4 text-right">
+                                  <div className="flex items-center justify-end gap-2">
+                                    <button
+                                      onClick={() => openDetail(pendaftar, 'validasi')}
+                                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-xs font-bold transition-all shadow-xs"
+                                    >
+                                      Buka Detail Validasi
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                      <Pagination currentPage={validasiPage} totalItems={pendingValidationList.length} pageSize={PAGE_SIZE} onPageChange={setValidasiPage} />
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* TAB 2b: TAHAP 2 — VERIFIKASI BERKAS */}
+              {activeTab === 'verifikasi_peserta' && (
+                <div className="glass-card-static p-6 animate-fade-in space-y-4">
+                  <div className="flex items-center justify-between pb-4 border-b border-[var(--card-border)]">
+                    <div>
+                      <h2 className="text-lg font-bold text-[var(--text-primary)]">Tahap 2 — Verifikasi Berkas & Fisik</h2>
+                      <p className="text-xs text-[var(--text-secondary)]">Pendaftar lolos validasi. Cek fisik + berkas, lalu masukkan ke angkatan & jadwal (status menjadi diterima).</p>
+                    </div>
+                    <span className="badge badge-processing">{pendingVerifikasiList.length} Menunggu verifikasi</span>
+                  </div>
+
+                  {pendingVerifikasiList.length === 0 ? (
+                    <div className="text-center py-12 text-[var(--text-tertiary)] text-sm">
+                      Tidak ada pendaftar menunggu verifikasi. Semua yang lolos validasi sudah diproses.
                     </div>
                   ) : (
                     <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xs">
@@ -1045,12 +1314,12 @@ export default function AdminDashboardPage(props: AdminDashboardProps) {
                               <th className="py-3.5 px-4">No. Registrasi</th>
                               <th className="py-3.5 px-4">Nama & NIK Peserta</th>
                               <th className="py-3.5 px-4">Program & HP</th>
-                              <th className="py-3.5 px-4 text-center">Status</th>
-                              <th className="py-3.5 px-4 text-right">Aksi Validasi</th>
+                              <th className="py-3.5 px-4 text-center">Tahap</th>
+                              <th className="py-3.5 px-4 text-right">Aksi Verifikasi</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-100 text-slate-700">
-                            {pendingValidationList.slice((validasiPage - 1) * PAGE_SIZE, validasiPage * PAGE_SIZE).map((pendaftar) => (
+                            {pendingVerifikasiList.slice((validasiPage - 1) * PAGE_SIZE, validasiPage * PAGE_SIZE).map((pendaftar) => (
                               <tr key={pendaftar.id} className="hover:bg-slate-50/60 transition-colors">
                                 <td className="py-3.5 px-4">
                                   <span className="font-mono font-bold text-indigo-600 block text-xs">{pendaftar.no_pendaftaran}</span>
@@ -1069,34 +1338,19 @@ export default function AdminDashboardPage(props: AdminDashboardProps) {
                                   <span className="block text-[11px] text-slate-500 font-medium">HP: {pendaftar.no_hp}</span>
                                 </td>
                                 <td className="py-3.5 px-4 text-center">
-                                  <span className="inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-semibold bg-amber-50 text-amber-700 border border-amber-200">
-                                    Menunggu Verifikasi
-                                  </span>
+                                  <span className={getTahapBadgeClass(pendaftar)}>{getTahapLabel(pendaftar)}</span>
                                 </td>
                                 <td className="py-3.5 px-4 text-right">
                                   <div className="flex items-center justify-end gap-2">
                                     <button
-                                      onClick={() => setSelectedPendaftar(pendaftar)}
+                                      onClick={() => openDetail(pendaftar, 'verifikasi')}
                                       className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition-all shadow-xs"
                                     >
                                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                                         <path d="M9 11l3 3L22 4" />
                                         <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
                                       </svg>
-                                      Detail & Verifikasi Peserta
-                                    </button>
-                                    <button
-                                      onClick={async () => {
-                                        await pendaftarApi.updateStatus(pendaftar.id, 'ditolak');
-                                        loadData();
-                                      }}
-                                      className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 rounded-lg text-xs font-semibold transition-all"
-                                    >
-                                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                        <line x1="18" y1="6" x2="6" y2="18" />
-                                        <line x1="6" y1="6" x2="18" y2="18" />
-                                      </svg>
-                                      Tolak
+                                      Buka Detail Verifikasi
                                     </button>
                                   </div>
                                 </td>
@@ -1105,7 +1359,7 @@ export default function AdminDashboardPage(props: AdminDashboardProps) {
                           </tbody>
                         </table>
                       </div>
-                      <Pagination currentPage={validasiPage} totalItems={pendingValidationList.length} pageSize={PAGE_SIZE} onPageChange={setValidasiPage} />
+                      <Pagination currentPage={validasiPage} totalItems={pendingVerifikasiList.length} pageSize={PAGE_SIZE} onPageChange={setValidasiPage} />
                     </div>
                   )}
                 </div>
@@ -1204,7 +1458,7 @@ export default function AdminDashboardPage(props: AdminDashboardProps) {
                                 <option value="belum_bayar">Belum Bayar</option>
                                 <option value="menunggu_konfirmasi">Menunggu Konfirmasi</option>
                                 <option value="lunas">Lunas</option>
-                                <option value="cicilan_sebagian">Cicilan</option>
+                                <option value="cicilan_sebagian">Sebagian</option>
                               </select>
                             </div>
 
@@ -1322,6 +1576,9 @@ export default function AdminDashboardPage(props: AdminDashboardProps) {
                         { key: 'menunggu', label: 'Menunggu' },
                         { key: 'diterima', label: 'Diterima' },
                         { key: 'ditolak', label: 'Ditolak' },
+                        { key: 'lulus', label: 'Lulus' },
+                        { key: 'sudah_bekerja', label: 'Sudah Bekerja' },
+                        { key: 'keluar', label: 'Keluar' },
                       ] as const
                     ).map((t) => (
                       <button
@@ -1343,7 +1600,7 @@ export default function AdminDashboardPage(props: AdminDashboardProps) {
 
                   <AdminPendaftarTable
                     data={searchedPendaftarList}
-                    onViewDetail={setSelectedPendaftar}
+                    onViewDetail={(p) => openDetail(p, 'semua')}
                     onDeletePendaftar={handleDeletePendaftar}
                   />
                 </div>
@@ -1355,7 +1612,7 @@ export default function AdminDashboardPage(props: AdminDashboardProps) {
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[var(--card-border)]">
                 <div>
                   <h2 className="text-lg font-bold text-[var(--text-primary)]">Validasi Pembayaran Peserta</h2>
-                  <p className="text-xs text-[var(--text-secondary)]">Daftar bukti transfer yang dikirim peserta untuk diperiksa (Lunas / Cicilan 3x)</p>
+                  <p className="text-xs text-[var(--text-secondary)]">Daftar bukti pembayaran yang dikirim peserta untuk diperiksa (terima, tolak, atau lunaskan)</p>
                 </div>
                 <div className="flex items-center gap-2">
                   <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl">
@@ -1413,215 +1670,109 @@ export default function AdminDashboardPage(props: AdminDashboardProps) {
                         });
                         return filteredPayments.slice((pembayaranPage - 1) * PAGE_SIZE, pembayaranPage * PAGE_SIZE)
                         .map((p, rowIdx) => {
-                          const isCicilan = p.jenis_pembayaran === 'cicilan' && p.cicilan;
-                          const allCicilan = isCicilan ? p.cicilan! : [];
-                          const pendingCicilan = allCicilan.filter((c: Cicilan) => c.status === 'menunggu_konfirmasi');
                           const totalBiaya = p.program?.harga || p.biaya_pelatihan || 0;
-                          const totalDibayar = allCicilan.filter((c: Cicilan) => c.status === 'lunas').reduce((acc: number, cur: Cicilan) => acc + (cur.jumlah || 0), 0);
-                          const latestPayment = p.tagihan?.pembayarans
-                            ?.filter((payment) => payment.status === 'menunggu_verifikasi')
-                            .sort((a, b) => new Date(b.tanggal_bayar).getTime() - new Date(a.tanggal_bayar).getTime())[0];
+                          const sisaTagihan = Number(p.tagihan?.nominal ?? totalBiaya);
+                          const pendingList = (p.tagihan?.pembayarans || [])
+                            .filter((payment) => payment.status === 'menunggu_verifikasi')
+                            .filter((payment) => filterPaymentType === 'semua' || payment.tipe_pembayaran === filterPaymentType)
+                            .sort((a, b) => new Date(b.tanggal_bayar).getTime() - new Date(a.tanggal_bayar).getTime());
+                          if (pendingList.length === 0) return null;
 
-                          if (!isCicilan) {
-                            // Single payment row
-                            return (
-                              <tr key={p.id} className="hover:bg-slate-50/60 transition-colors">
-                                <td className="px-4 py-3 font-mono text-[var(--text-tertiary)]">{rowIdx + 1}</td>
-                                <td className="px-4 py-3">
-                                  <div className="font-bold text-[var(--text-primary)]">{p.nama_lengkap}</div>
-                                  <div className="text-[10px] font-mono text-[var(--primary)]">{p.no_pendaftaran}</div>
-                                </td>
-                                <td className="px-4 py-3 text-[var(--text-secondary)]">{p.jenis_pelatihan}</td>
-                                <td className="px-4 py-3">
-                                  <span className="badge badge-pending text-[10px]">{latestPayment?.tipe_pembayaran === 'cash' ? 'Cash' : latestPayment?.tipe_pembayaran === 'transfer' ? 'Transfer' : 'Lunas'}</span>
-                                </td>
-                                <td className="px-4 py-3 font-bold text-[var(--text-primary)] font-mono whitespace-nowrap">
-                                  Rp {Number(latestPayment?.nominal || totalBiaya).toLocaleString('id-ID', { maximumFractionDigits: 0 })}
-                                </td>
-                                <td className="px-4 py-3 text-[var(--text-secondary)] whitespace-nowrap">
-                                  {latestPayment?.tanggal_bayar || p.tanggal_bayar ? new Date(latestPayment?.tanggal_bayar || p.tanggal_bayar!).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' }) : '-'}
-                                  {(latestPayment?.nama_pengirim || latestPayment?.nama_penerima || latestPayment?.metode_pembayaran || p.metode_pembayaran) && (
-                                    <div className="text-[10px] text-[var(--text-tertiary)] mt-0.5">
-                                      {latestPayment?.tipe_pembayaran === 'transfer'
-                                        ? `${latestPayment.nama_pengirim || '-'} (${latestPayment.jenis_pengirim || '-'})`
-                                        : latestPayment?.nama_penerima || latestPayment?.metode_pembayaran || p.metode_pembayaran}
-                                    </div>
-                                  )}
-                                </td>
-                                <td className="px-4 py-3">
-                                  {latestPayment?.bukti_pembayaran || p.bukti_pembayaran ? (
-                                    <img
-                                      src={latestPayment?.bukti_pembayaran || p.bukti_pembayaran || ''}
-                                      alt="Bukti"
-                                      className="w-12 h-12 rounded-lg object-cover border border-[var(--card-border)] cursor-pointer hover:opacity-80 transition shadow-sm"
-                                      onClick={() => setSelectedPendaftar(p)}
-                                      title="Lihat bukti transfer"
-                                    />
-                                  ) : (
-                                    <span className="text-[var(--text-tertiary)] italic">Tidak ada</span>
-                                  )}
-                                </td>
-                                <td className="px-4 py-3">
-                                  <span className="text-[10px] font-bold px-2 py-1 rounded-full bg-amber-100 text-amber-700 whitespace-nowrap">
-                                    {latestPayment?.status === 'menunggu_verifikasi' ? 'Menunggu Verifikasi' : 'Menunggu Konfirmasi'}
-                                  </span>
-                                </td>
-                                <td className="px-4 py-3">
-                                  <div className="flex items-center justify-center gap-1.5">
-                                    <button
-                                      onClick={() => {
-                                        if (latestPayment) {
-                                          setSelectedPaymentDetail({ pendaftar: p, pembayaran: latestPayment });
-                                        }
-                                      }}
-                                      className="btn btn-outline btn-sm text-[10px] py-1 px-2 whitespace-nowrap"
-                                      title="Lihat detail"
-                                    >
-                                      Detail
-                                    </button>
-                                    <button
-                                      onClick={async () => { await pembayaranApi.verifikasi(p.id); loadData(); }}
-                                      className="btn btn-accent btn-sm text-[10px] py-1 px-2 flex items-center gap-1 whitespace-nowrap"
-                                      title="Konfirmasi lunas"
-                                    >
-                                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
-                                      Konfirmasi
-                                    </button>
-                                    <button
-                                      onClick={async () => { await pembayaranApi.tolak(p.id); loadData(); }}
-                                      className="btn btn-danger btn-sm text-[10px] py-1 px-2 whitespace-nowrap"
-                                      title="Tolak pembayaran"
-                                    >
-                                      Tolak
-                                    </button>
-                                  </div>
-                                </td>
-                              </tr>
-                            );
-                          }
-
-                          // Cicilan — show main row + expandable sub-rows per termin
+                          // Satu baris per pembayaran menunggu (tanpa skema cicilan termin)
                           return (
-                            <>
-                              {/* Cicilan parent row */}
-                              <tr key={p.id} className="bg-indigo-50/30 hover:bg-indigo-50/50 transition-colors">
-                                <td className="px-4 py-3 font-mono text-[var(--text-tertiary)]">{rowIdx + 1}</td>
-                                <td className="px-4 py-3">
-                                  <div className="font-bold text-[var(--text-primary)]">{p.nama_lengkap}</div>
-                                  <div className="text-[10px] font-mono text-[var(--primary)]">{p.no_pendaftaran}</div>
-                                </td>
-                                <td className="px-4 py-3 text-[var(--text-secondary)]">{p.jenis_pelatihan}</td>
-                                <td className="px-4 py-3">
-                                  <span className="badge badge-processing text-[10px]">Cicilan 3x</span>
-                                </td>
-                                <td className="px-4 py-3 font-mono">
-                                  <div className="text-[var(--text-primary)] font-bold">Rp {totalBiaya.toLocaleString('id-ID')}</div>
-                                  <div className="text-[10px] text-emerald-600">Terbayar: Rp {totalDibayar.toLocaleString('id-ID')}</div>
-                                  {/* Mini progress bar */}
-                                  <div className="w-20 h-1 bg-slate-200 rounded-full overflow-hidden mt-1">
-                                    <div className="h-full bg-gradient-to-r from-indigo-500 to-emerald-500 rounded-full" style={{ width: `${totalBiaya > 0 ? Math.round((totalDibayar / totalBiaya) * 100) : 0}%` }} />
-                                  </div>
-                                </td>
-                                <td className="px-4 py-3 text-[var(--text-secondary)]" colSpan={2}>
-                                  <span className="text-[10px] text-indigo-600 font-semibold">{pendingCicilan.length} termin menunggu konfirmasi</span>
-                                </td>
-                                <td className="px-4 py-3">
-                                  <span className="text-[10px] font-bold px-2 py-1 rounded-full bg-indigo-100 text-indigo-700 whitespace-nowrap animate-pulse">
-                                    {pendingCicilan.length} Perlu Konfirmasi
-                                  </span>
-                                </td>
-                                <td className="px-4 py-3 text-center">
-                                  <button onClick={() => setSelectedPendaftar(p)} className="btn btn-outline btn-sm text-[10px] py-1 px-2">
-                                    Detail
-                                  </button>
-                                </td>
-                              </tr>
-
-                              {/* Sub-rows for each cicilan termin */}
-                              {allCicilan.map((c: Cicilan) => (
-                                <tr key={c.id} className={`border-l-4 ${
-                                  c.status === 'menunggu_konfirmasi' ? 'border-l-amber-400 bg-amber-50/40' :
-                                  c.status === 'lunas' ? 'border-l-emerald-400 bg-emerald-50/20' :
-                                  c.status === 'ditolak' ? 'border-l-red-400 bg-red-50/20' :
-                                  'border-l-slate-200 bg-slate-50/20'
-                                } hover:bg-white/60 transition-colors`}>
-                                  <td className="px-4 py-2 text-[10px] text-[var(--text-tertiary)] pl-8">
-                                    <span className="w-5 h-5 rounded-full border-2 flex items-center justify-center text-[9px] font-bold inline-flex mr-1 ${
-                                      c.status === 'lunas' ? 'bg-emerald-100 border-emerald-400 text-emerald-700' :
-                                      c.status === 'menunggu_konfirmasi' ? 'bg-amber-100 border-amber-400 text-amber-700' :
-                                      'bg-slate-100 border-slate-300 text-slate-500'
-                                    }">{c.termin}</span>
-                                  </td>
-                                  <td className="px-4 py-2" colSpan={2}>
-                                    <div className="text-[11px] font-bold text-[var(--text-primary)]">Cicilan Termin {c.termin}</div>
-                                    <div className="text-[10px] text-[var(--text-tertiary)]">
-                                      Jatuh tempo: {new Date(c.jatuh_tempo).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}
-                                      {c.metode_pembayaran && <> • {c.metode_pembayaran}</>}
-                                    </div>
-                                    {c.catatan_admin && (
-                                      <div className="text-[10px] text-red-600 mt-0.5">⚠ {c.catatan_admin}</div>
-                                    )}
-                                  </td>
-                                  <td className="px-4 py-2">
-                                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                                      c.status === 'lunas' ? 'bg-emerald-100 text-emerald-700' :
-                                      c.status === 'menunggu_konfirmasi' ? 'bg-amber-100 text-amber-700' :
-                                      c.status === 'ditolak' ? 'bg-red-100 text-red-700' :
-                                      'bg-slate-100 text-slate-500'
-                                    }`}>
-                                      {c.status === 'lunas' ? 'Diverifikasi' : c.status === 'menunggu_konfirmasi' ? 'Menunggu' : c.status === 'ditolak' ? 'Ditolak' : 'Belum Bayar'}
-                                    </span>
-                                  </td>
-                                  <td className="px-4 py-2 font-mono text-[11px] font-bold text-[var(--text-primary)]">
-                                    Rp {c.jumlah.toLocaleString('id-ID')}
-                                  </td>
-                                  <td className="px-4 py-2 text-[10px] text-[var(--text-tertiary)] whitespace-nowrap">
-                                    {c.tanggal_bayar ? new Date(c.tanggal_bayar).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' }) : '-'}
-                                  </td>
-                                  <td className="px-4 py-2">
-                                    {c.bukti_pembayaran ? (
-                                      <img
-                                        src={c.bukti_pembayaran}
-                                        alt={`Bukti Cicilan ${c.termin}`}
-                                        className="w-10 h-10 rounded-lg object-cover border border-[var(--card-border)] cursor-pointer hover:opacity-80 transition shadow-sm"
-                                        onClick={() => setSelectedPendaftar(p)}
-                                        title={`Bukti cicilan termin ${c.termin}`}
-                                      />
-                                    ) : (
-                                      <span className="text-[var(--text-tertiary)] italic text-[10px]">Belum upload</span>
-                                    )}
-                                  </td>
-                                  <td colSpan={1} />
-                                  <td className="px-4 py-2">
-                                    {c.status === 'menunggu_konfirmasi' && (
-                                      <div className="flex items-center gap-1.5">
+                              <>
+                                {pendingList.map((payment) => (
+                                  <tr key={payment.id} className="hover:bg-slate-50/60 transition-colors">
+                                    <td className="px-4 py-3 font-mono text-[var(--text-tertiary)]">{rowIdx + 1}</td>
+                                    <td className="px-4 py-3">
+                                      <div className="font-bold text-[var(--text-primary)]">{p.nama_lengkap}</div>
+                                      <div className="text-[10px] font-mono text-[var(--primary)]">{p.no_pendaftaran}</div>
+                                      <div className="text-[10px] text-indigo-600 font-semibold mt-0.5">Sisa: Rp {sisaTagihan.toLocaleString('id-ID', { maximumFractionDigits: 0 })}</div>
+                                    </td>
+                                    <td className="px-4 py-3 text-[var(--text-secondary)]">{p.jenis_pelatihan}</td>
+                                    <td className="px-4 py-3">
+                                      <span className="badge badge-pending text-[10px]">{payment.tipe_pembayaran === 'cash' ? 'Cash' : 'Transfer'}</span>
+                                    </td>
+                                    <td className="px-4 py-3 font-bold text-[var(--text-primary)] font-mono whitespace-nowrap">
+                                      Rp {Number(payment.nominal).toLocaleString('id-ID', { maximumFractionDigits: 0 })}
+                                    </td>
+                                    <td className="px-4 py-3 text-[var(--text-secondary)] whitespace-nowrap">
+                                      {payment.tanggal_bayar ? new Date(payment.tanggal_bayar).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' }) : '-'}
+                                      {(payment.nama_pengirim || payment.nama_penerima || payment.metode_pembayaran) && (
+                                        <div className="text-[10px] text-[var(--text-tertiary)] mt-0.5">
+                                          {payment.tipe_pembayaran === 'transfer'
+                                            ? `${payment.nama_pengirim || '-'} (${payment.jenis_pengirim || '-'})`
+                                            : payment.nama_penerima || payment.metode_pembayaran}
+                                        </div>
+                                      )}
+                                    </td>
+                                    <td className="px-4 py-3">
+                                      {payment.bukti_pembayaran ? (
+                                        <img
+                                          src={payment.bukti_pembayaran}
+                                          alt="Bukti"
+                                          className="w-12 h-12 rounded-lg object-cover border border-[var(--card-border)] cursor-pointer hover:opacity-80 transition shadow-sm"
+                                          onClick={() => openDetail(p, 'semua')}
+                                          title="Lihat bukti transfer"
+                                        />
+                                      ) : (
+                                        <span className="text-[var(--text-tertiary)] italic">Tidak ada</span>
+                                      )}
+                                    </td>
+                                    <td className="px-4 py-3">
+                                      <span className="text-[10px] font-bold px-2 py-1 rounded-full bg-amber-100 text-amber-700 whitespace-nowrap">
+                                        Menunggu Validasi
+                                      </span>
+                                    </td>
+                                    <td className="px-4 py-3">
+                                      <div className="flex items-center justify-center gap-1.5 flex-wrap">
                                         <button
-                                          onClick={async () => { await cicilanApi.verifikasi(c.id); loadData(); }}
-                                          className="btn btn-accent btn-sm text-[10px] py-1 px-2 flex items-center gap-1 whitespace-nowrap"
+                                          onClick={() => setSelectedPaymentDetail({ pendaftar: p, pembayaran: payment })}
+                                          className="btn btn-outline btn-sm text-[10px] py-1 px-2 whitespace-nowrap"
+                                          title="Lihat detail"
                                         >
-                                          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
-                                          Konfirmasi
+                                          Detail
                                         </button>
                                         <button
-                                          onClick={async () => { const catatan = prompt('Alasan penolakan (opsional):'); await cicilanApi.tolak(c.id, catatan || undefined); loadData(); }}
+                                          onClick={async () => { await pembayaranApi.verifikasiTransaksi(payment.id, false); loadData(); }}
+                                          className="btn btn-accent btn-sm text-[10px] py-1 px-2 flex items-center gap-1 whitespace-nowrap"
+                                          title="Terima pembayaran, sisa tagihan berkurang"
+                                        >
+                                          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+                                          Validasi
+                                        </button>
+                                        <button
+                                          onClick={async () => {
+                                            if (!window.confirm(`Validasi Rp ${Number(payment.nominal).toLocaleString('id-ID')} sekaligus LUNASKAN sisa tagihan ${p.nama_lengkap}?`)) return;
+                                            await pembayaranApi.verifikasiTransaksi(payment.id, true);
+                                            loadData();
+                                          }}
+                                          className="btn btn-sm text-[10px] py-1 px-2 flex items-center gap-1 whitespace-nowrap bg-emerald-600 hover:bg-emerald-700 text-white"
+                                          title="Terima pembayaran dan tandai tagihan lunas"
+                                        >
+                                          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+                                          Validasi & Lunas
+                                        </button>
+                                        <button
+                                          onClick={async () => {
+                                            const catatan = window.prompt('Alasan penolakan (opsional):');
+                                            if (catatan === null) return;
+                                            await pembayaranApi.tolakTransaksi(payment.id, catatan || undefined);
+                                            loadData();
+                                          }}
                                           className="btn btn-danger btn-sm text-[10px] py-1 px-2 whitespace-nowrap"
+                                          title="Tolak pembayaran"
                                         >
                                           Tolak
                                         </button>
                                       </div>
-                                    )}
-                                    {c.status === 'lunas' && (
-                                      <span className="text-[10px] text-emerald-600 font-bold flex items-center gap-1">
-                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>
-                                        Terverifikasi
-                                      </span>
-                                    )}
-                                  </td>
-                                </tr>
-                              ))}
-                            </>
-                          );
-                        });
+                                    </td>
+                                  </tr>
+                                ))}
+                              </>
+                            );
+                          });
+
                       })()}
                     </tbody>
                   </table>
@@ -1631,10 +1782,41 @@ export default function AdminDashboardPage(props: AdminDashboardProps) {
             </div>
           )}
 
-          {/* TAB: KELOLA PELATIHAN */}
-          {activeTab === 'kelola_pelatihan' && (
+          {/* TAB: KELOLA PROGRAM */}
+          {activeTab === 'kelola_program' && (
             <div className="glass-card-static p-6 animate-fade-in">
               <PelatihanManager initialProgramList={programList} />
+            </div>
+          )}
+
+          {/* TAB: KELOLA PELATIHAN (overview anak menu) */}
+          {activeTab === 'kelola_pelatihan' && (
+            <div className="glass-card-static p-6 animate-fade-in space-y-5">
+              <div>
+                <h2 className="text-lg font-bold text-[var(--text-primary)]">Kelola Pelatihan</h2>
+                <p className="text-xs text-[var(--text-secondary)]">Pilih alur kerja akademik: angkatan, kelas, jadwal sesi, atau penilaian.</p>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {([
+                  { id: 'kelola_angkatan' as AdminTab, title: 'Kelola Angkatan', desc: 'Buat dan atur angkatan pelatihan per program.', count: `${angkatanList.length} angkatan`, color: 'bg-indigo-600' },
+                  { id: 'kelola_kelas' as AdminTab, title: 'Kelola Kelas', desc: 'Daftar kelas (angkatan + tempat). Klik kelas untuk melihat peserta.', count: `${groupJadwalToKelas(jadwalList, angkatanList, props.initialTempatList || []).length} kelas`, color: 'bg-emerald-600' },
+                  { id: 'kelola_jadwal' as AdminTab, title: 'Kelola Jadwal', desc: 'Pilih kelas, lalu susun sesi hari 1–10.', count: `${jadwalList.length} sesi`, color: 'bg-blue-600' },
+                  { id: 'kelola_penilaian' as AdminTab, title: 'Kelola Penilaian', desc: 'Pilih kelas untuk mengisi nilai peserta.', count: `${pendaftarList.filter((p) => p.status === 'diterima').length} peserta aktif`, color: 'bg-amber-500' },
+                ]).map((c) => (
+                  <button
+                    key={c.id}
+                    onClick={() => setActiveTab(c.id)}
+                    className="text-left p-5 rounded-2xl bg-white border border-slate-200/80 shadow-2xs hover:shadow-md hover:border-indigo-200 transition-all group"
+                  >
+                    <div className={`w-9 h-9 rounded-xl ${c.color} text-white flex items-center justify-center font-extrabold text-xs mb-3`}>
+                      {c.count.split(' ')[0]}
+                    </div>
+                    <div className="font-bold text-slate-900 text-sm group-hover:text-indigo-700">{c.title} →</div>
+                    <div className="text-xs text-slate-500 mt-1">{c.desc}</div>
+                    <div className="text-[11px] font-bold text-slate-400 mt-2 font-mono">{c.count}</div>
+                  </button>
+                ))}
+              </div>
             </div>
           )}
 
@@ -1649,6 +1831,20 @@ export default function AdminDashboardPage(props: AdminDashboardProps) {
             </div>
           )}
 
+          {/* TAB: KELOLA KELAS (angkatan + tempat → peserta) */}
+          {activeTab === 'kelola_kelas' && (
+            <div className="glass-card-static p-6 animate-fade-in">
+              <JadwalManager
+                mode="kelas"
+                initialAngkatanList={angkatanList}
+                initialPendaftarList={pendaftarList}
+                initialJadwalList={jadwalList}
+                initialTempatList={props.initialTempatList || []}
+                initialInstrukturList={instrukturList}
+              />
+            </div>
+          )}
+
           {/* TAB: KELOLA TEMPAT */}
           {activeTab === 'kelola_tempat' && (
             <div className="glass-card-static p-6 animate-fade-in">
@@ -1656,14 +1852,37 @@ export default function AdminDashboardPage(props: AdminDashboardProps) {
             </div>
           )}
 
-          {/* TAB 5: KELOLA JADWAL */}
+          {/* TAB: KELOLA INSTRUKTUR */}
+          {activeTab === 'kelola_instruktur' && (
+            <div className="glass-card-static p-6 animate-fade-in">
+              <InstrukturManager initialInstrukturList={instrukturList} />
+            </div>
+          )}
+
+          {/* TAB: KELOLA JADWAL (kelas → sesi hari 1-10) */}
           {activeTab === 'kelola_jadwal' && (
             <div className="glass-card-static p-6 animate-fade-in">
               <JadwalManager
+                mode="jadwal"
                 initialAngkatanList={angkatanList}
                 initialPendaftarList={pendaftarList}
                 initialJadwalList={jadwalList}
                 initialTempatList={props.initialTempatList || []}
+                initialInstrukturList={instrukturList}
+              />
+            </div>
+          )}
+
+          {/* TAB: KELOLA PENILAIAN (kelas → peserta → isi nilai) */}
+          {activeTab === 'kelola_penilaian' && (
+            <div className="glass-card-static p-6 animate-fade-in">
+              <JadwalManager
+                mode="penilaian"
+                initialAngkatanList={angkatanList}
+                initialPendaftarList={pendaftarList}
+                initialJadwalList={jadwalList}
+                initialTempatList={props.initialTempatList || []}
+                initialInstrukturList={instrukturList}
               />
             </div>
           )}
@@ -1695,7 +1914,7 @@ export default function AdminDashboardPage(props: AdminDashboardProps) {
                 </button>
               </div>
 
-              {/* Filter Tipe Soal */}
+              {/* Filter Tipe + Status Soal */}
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-xs text-slate-500 font-semibold mr-1">Filter Tipe:</span>
                 {(['semua', 'pretest', 'posttest'] as const).map((t) => (
@@ -1707,23 +1926,44 @@ export default function AdminDashboardPage(props: AdminDashboardProps) {
                     {t}
                   </button>
                 ))}
+                <span className="text-xs text-slate-500 font-semibold ml-3 mr-1">Status:</span>
+                {(['semua', 'aktif', 'nonaktif'] as const).map((t) => (
+                  <button
+                    key={t}
+                    onClick={() => setFilterSoalStatus(t)}
+                    className={`btn btn-sm text-xs capitalize ${filterSoalStatus === t ? 'btn-primary' : 'btn-outline'}`}
+                  >
+                    {t}
+                  </button>
+                ))}
               </div>
 
               {/* Grid Soal */}
               <div className="space-y-4">
                 {(() => {
-                  const filteredSoal = soalList.filter((s) => filterSoalTipe === 'semua' || s.tipe === filterSoalTipe);
+                  const filteredSoal = soalList.filter((s) => {
+                    if (filterSoalTipe !== 'semua' && s.tipe !== filterSoalTipe) return false;
+                    const aktif = s.is_active ?? true;
+                    if (filterSoalStatus === 'aktif' && !aktif) return false;
+                    if (filterSoalStatus === 'nonaktif' && aktif) return false;
+                    return true;
+                  });
                   const paginatedSoal = filteredSoal.slice((soalPage - 1) * PAGE_SIZE, soalPage * PAGE_SIZE);
-                  return paginatedSoal.map((soal, idx) => (
+                  return paginatedSoal.map((soal, idx) => {
+                    const soalAktif = soal.is_active ?? true;
+                    return (
                     <div
                       key={soal.id}
-                      className="p-4 rounded-xl bg-[var(--surface)] border border-[var(--card-border)] space-y-3"
+                      className={`p-4 rounded-xl bg-[var(--surface)] border space-y-3 ${soalAktif ? 'border-[var(--card-border)]' : 'border-slate-300 opacity-75'}`}
                     >
                       <div className="flex items-start justify-between gap-4">
                         <div className="space-y-1 flex-1">
                           <div className="flex items-center gap-2 flex-wrap">
                             <span className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase ${soal.tipe === 'pretest' ? 'bg-amber-50 text-amber-700 border border-amber-200' : 'bg-emerald-50 text-emerald-700 border border-emerald-200'}`}>
                               {soal.tipe}
+                            </span>
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase ${soalAktif ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-slate-100 text-slate-500 border border-slate-300'}`}>
+                              {soalAktif ? 'Aktif' : 'Nonaktif'}
                             </span>
                             <span className="text-xs font-semibold text-[var(--text-tertiary)] font-mono">
                               Program: {soal.jenis_pelatihan}
@@ -1738,9 +1978,12 @@ export default function AdminDashboardPage(props: AdminDashboardProps) {
                           <h4 className="font-bold text-[var(--text-primary)] text-sm">
                             {idx + 1}. {soal.pertanyaan}
                           </h4>
+                          {!soalAktif && (
+                            <p className="text-[11px] text-slate-500 italic">Soal nonaktif — tidak muncul pada ujian peserta.</p>
+                          )}
                         </div>
 
-                        <div className="flex items-center gap-1.5 shrink-0">
+                        <div className="flex items-center gap-1.5 shrink-0 flex-wrap justify-end">
                           {soal.gambar_soal && (
                             <img
                               src={soal.gambar_soal}
@@ -1750,6 +1993,13 @@ export default function AdminDashboardPage(props: AdminDashboardProps) {
                               title="Lihat gambar soal"
                             />
                           )}
+                          <button
+                            onClick={() => handleToggleSoalStatus(soal)}
+                            className={`btn btn-sm text-xs py-1 ${soalAktif ? 'btn-outline' : 'btn-primary'}`}
+                            title={soalAktif ? 'Nonaktifkan soal' : 'Aktifkan soal'}
+                          >
+                            {soalAktif ? 'Nonaktifkan' : 'Aktifkan'}
+                          </button>
                           <button
                             onClick={() => handleOpenEditSoal(soal)}
                             className="btn btn-outline btn-sm text-xs py-1"
@@ -1789,9 +2039,16 @@ export default function AdminDashboardPage(props: AdminDashboardProps) {
                         })}
                       </div>
                     </div>
-                  ));
+                    );
+                  });
                 })()}
-                <Pagination currentPage={soalPage} totalItems={soalList.filter((s) => filterSoalTipe === 'semua' || s.tipe === filterSoalTipe).length} pageSize={PAGE_SIZE} onPageChange={setSoalPage} />
+                <Pagination currentPage={soalPage} totalItems={soalList.filter((s) => {
+                  if (filterSoalTipe !== 'semua' && s.tipe !== filterSoalTipe) return false;
+                  const aktif = s.is_active ?? true;
+                  if (filterSoalStatus === 'aktif' && !aktif) return false;
+                  if (filterSoalStatus === 'nonaktif' && aktif) return false;
+                  return true;
+                }).length} pageSize={PAGE_SIZE} onPageChange={setSoalPage} />
               </div>
             </div>
           )}
@@ -1803,10 +2060,10 @@ export default function AdminDashboardPage(props: AdminDashboardProps) {
             </div>
           )}
 
-          {/* TAB 11: ABSENSI & PENILAIAN */}
-          {activeTab === 'absensi_penilaian' && (
+           {/* TAB 11: MATA PELATIHAN */}
+          {activeTab === 'mata_pelajaran' && (
             <div className="glass-card-static p-6 animate-fade-in">
-              <AbsensiManager angkatanList={angkatanList} programList={programList} />
+              <MataPelatihanManager angkatanList={angkatanList} programList={programList} />
             </div>
           )}
             </>
@@ -1944,14 +2201,14 @@ export default function AdminDashboardPage(props: AdminDashboardProps) {
 
               <div>
                 <label className="form-label">Pengajar / Instruktur Sesi</label>
-                <input
-                  type="text"
-                  className="form-input"
-                  placeholder="Contoh: Hj. Siti Rahmah, S.Ds / Sri Wahyuni, S.Pd"
+                <InstrukturSearchSelect
                   value={jPengajar}
-                  onChange={(e) => setJPengajar(e.target.value)}
+                  onChange={setJPengajar}
+                  instrukturList={instrukturList}
+                  placeholder="Ketik untuk cari instruktur..."
                   required
                 />
+                <p className="text-[10px] text-slate-500 mt-1">Ketik untuk mencari, pilih dari daftar, atau isi nama manual.</p>
               </div>
 
               <div className="flex justify-end gap-2 pt-3">
@@ -2317,6 +2574,26 @@ export default function AdminDashboardPage(props: AdminDashboardProps) {
                   <option value={2}>C - {sOpsiC || 'Opsi C'}</option>
                   <option value={3}>D - {sOpsiD || 'Opsi D'}</option>
                 </select>
+              </div>
+
+              <div className="p-3 rounded-xl border border-[var(--card-border)] bg-[var(--surface)] flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-xs font-bold text-[var(--text-primary)]">Status Soal</div>
+                  <div className="text-[11px] text-[var(--text-secondary)]">
+                    {sIsActive ? 'Aktif — soal muncul pada ujian peserta.' : 'Nonaktif — soal disembunyikan dari ujian peserta.'}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={sIsActive}
+                  onClick={() => setSIsActive((v) => !v)}
+                  className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${sIsActive ? 'bg-emerald-600' : 'bg-slate-300'}`}
+                >
+                  <span
+                    className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${sIsActive ? 'translate-x-5' : 'translate-x-0.5'}`}
+                  />
+                </button>
               </div>
 
               <div className="flex justify-end gap-2 pt-3">

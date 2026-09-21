@@ -50,18 +50,19 @@ Route::get('/peserta/login', function () {
 // Dashboards — Direct Props (Inertia Server-Side Loaded)
 Route::get('/admin/dashboard', function () {
     return Inertia::render('Admin/Dashboard', [
-        'initialPendaftarList' => Pendaftar::with(['program', 'angkatan', 'user', 'cicilan', 'tagihan.pembayarans.paymentMethod'])->latest('tanggal_daftar')->get(),
+        'initialPendaftarList' => Pendaftar::with(['program', 'angkatan', 'user', 'tagihan.pembayarans.paymentMethod'])->latest('tanggal_daftar')->get(),
         'initialJadwalList'    => JadwalPelatihan::with('peserta')->get(),
         'initialSoalList'      => SoalUjian::all(),
         'initialProgramList'   => ProgramPelatihan::all(),
         'initialAngkatanList'  => Angkatan::with(['program', 'pendaftar'])->withCount('pendaftar')->get(),
         'initialTempatList'    => TempatPelatihan::all(),
+        'initialInstrukturList'=> \App\Models\Instruktur::with('user')->orderBy('nama')->get(),
         'initialPaymentMethods'=> PaymentMethod::all(),
     ]);
 });
 
 Route::get('/admin/peserta/{id}', function ($id) {
-    $pendaftar = Pendaftar::with(['program', 'angkatan', 'user', 'interview', 'cicilan', 'kelulusan'])->find($id);
+    $pendaftar = Pendaftar::with(['program', 'angkatan', 'user', 'interview', 'kelulusan'])->find($id);
     return Inertia::render('Admin/PesertaDetail', [
         'id'                  => $id,
         'initialPendaftar'    => $pendaftar,
@@ -74,10 +75,10 @@ Route::get('/peserta/dashboard', function () {
     $user = auth()->user();
     $pendaftar = null;
     if ($user) {
-        $pendaftar = Pendaftar::with(['program', 'angkatan', 'user', 'cicilan', 'tagihan.pembayarans.paymentMethod'])->where('user_id', $user->id)->first();
+        $pendaftar = Pendaftar::with(['program', 'angkatan', 'user', 'tagihan.pembayarans.paymentMethod'])->where('user_id', $user->id)->first();
     }
     if (!$pendaftar) {
-        $pendaftar = Pendaftar::with(['program', 'angkatan', 'user', 'cicilan', 'tagihan.pembayarans.paymentMethod'])->latest('tanggal_daftar')->first();
+        $pendaftar = Pendaftar::with(['program', 'angkatan', 'user', 'tagihan.pembayarans.paymentMethod'])->latest('tanggal_daftar')->first();
     }
 
     $jadwalList = [];
@@ -111,10 +112,10 @@ Route::get('/peserta/ujian', function () {
     $user = auth()->user();
     $pendaftar = null;
     if ($user) {
-        $pendaftar = Pendaftar::with(['program', 'angkatan', 'user', 'cicilan'])->where('user_id', $user->id)->first();
+        $pendaftar = Pendaftar::with(['program', 'angkatan', 'user'])->where('user_id', $user->id)->first();
     }
     if (!$pendaftar) {
-        $pendaftar = Pendaftar::with(['program', 'angkatan', 'user', 'cicilan'])->latest('tanggal_daftar')->first();
+        $pendaftar = Pendaftar::with(['program', 'angkatan', 'user'])->latest('tanggal_daftar')->first();
     }
 
     return Inertia::render('Peserta/Ujian', [
@@ -171,15 +172,130 @@ Route::post('/tempat', [TempatPelatihanController::class, 'store']);
 Route::put('/tempat/{id}', [TempatPelatihanController::class, 'update']);
 Route::delete('/tempat/{id}', [TempatPelatihanController::class, 'destroy']);
 
+// Instruktur (master data pengajar — dipilih / diketik manual pada form jadwal)
+Route::get('/instruktur', function (\Illuminate\Http\Request $request) {
+    $query = \App\Models\Instruktur::with('user')->orderBy('nama');
+    if ($request->filled('status')) $query->where('status', $request->status);
+    if ($request->filled('search')) $query->where('nama', 'like', '%' . $request->search . '%');
+    return response()->json(['success' => true, 'data' => $query->get()]);
+});
+Route::get('/instruktur/{id}', function (string $id) {
+    $ins = \App\Models\Instruktur::with('user')->find($id);
+    if (!$ins) return response()->json(['success' => false, 'message' => 'Instruktur tidak ditemukan'], 404);
+    return response()->json(['success' => true, 'data' => $ins]);
+});
+Route::post('/instruktur', function (\Illuminate\Http\Request $request) {
+    $data = $request->validate([
+        'nama'     => 'required|string|max:100',
+        'no_hp'    => 'nullable|string|max:20',
+        'email'    => 'nullable|email|max:100',
+        'keahlian' => 'nullable|string|max:150',
+        'status'   => 'nullable|in:Aktif,Nonaktif',
+        'username' => 'nullable|string|max:50|unique:users,username',
+        'password' => 'nullable|string|min:6|required_with:username',
+    ]);
+
+    $username = $data['username'] ?? null;
+    unset($data['username'], $data['password']);
+
+    $ins = \App\Models\Instruktur::create(array_merge($data, ['id' => \Illuminate\Support\Str::uuid()]));
+
+    // Buatkan akun login otomatis bila username + password diisi
+    if ($username && $request->filled('password')) {
+        $email = $data['email'] ?? null;
+        if (!$email) {
+            $base = \Illuminate\Support\Str::slug($username, '') ?: 'instruktur';
+            $email = $base . '@instruktur.local';
+            $i = 1;
+            while (\App\Models\User::where('email', $email)->exists()) {
+                $email = $base . $i++ . '@instruktur.local';
+            }
+        }
+        $user = \App\Models\User::create([
+            'id'       => (string) \Illuminate\Support\Str::uuid(),
+            'username' => $username,
+            'email'    => $email,
+            'password' => \Illuminate\Support\Facades\Hash::make($request->password),
+            'role'     => 'INSTRUKTUR',
+        ]);
+        $ins->update(['user_id' => $user->id]);
+    }
+
+    return response()->json(['success' => true, 'data' => $ins->load('user')], 201);
+});
+Route::put('/instruktur/{id}', function (\Illuminate\Http\Request $request, string $id) {
+    $ins = \App\Models\Instruktur::find($id);
+    if (!$ins) return response()->json(['success' => false, 'message' => 'Instruktur tidak ditemukan'], 404);
+
+    $ignoreId = $ins->user_id ?? '00000000-0000-0000-0000-000000000000';
+    $data = $request->validate([
+        'nama'     => 'sometimes|string|max:100',
+        'no_hp'    => 'nullable|string|max:20',
+        'email'    => 'nullable|email|max:100',
+        'keahlian' => 'nullable|string|max:150',
+        'status'   => 'nullable|in:Aktif,Nonaktif',
+        'username' => 'nullable|string|max:50|unique:users,username,' . $ignoreId . ',id',
+        'password' => 'nullable|string|min:6',
+    ]);
+
+    $username = $data['username'] ?? null;
+    unset($data['username'], $data['password']);
+    $ins->update($data);
+
+    // Sinkronkan email akun login bila email master diubah & belum dipakai akun lain
+    if (array_key_exists('email', $data) && $data['email'] && $ins->user_id) {
+        $linked = \App\Models\User::find($ins->user_id);
+        if ($linked && $data['email'] !== $linked->email
+            && !\App\Models\User::where('email', $data['email'])->where('id', '!=', $linked->id)->exists()) {
+            $linked->update(['email' => $data['email']]);
+        }
+    }
+
+    // Buat akun bila belum ada, atau perbarui akun yang tertaut
+    if ($username || $request->filled('password')) {
+        if (!$ins->user_id) {
+            if (!$username || !$request->filled('password')) {
+                return response()->json(['success' => false, 'message' => 'Username dan password wajib diisi untuk membuat akun.'], 422);
+            }
+            $user = \App\Models\User::create([
+                'id'       => (string) \Illuminate\Support\Str::uuid(),
+                'username' => $username,
+                'email'    => $ins->email ?: $username . '@instruktur.local',
+                'password' => \Illuminate\Support\Facades\Hash::make($request->password),
+                'role'     => 'INSTRUKTUR',
+            ]);
+            $ins->update(['user_id' => $user->id]);
+        } else {
+            $user = \App\Models\User::find($ins->user_id);
+            if ($user) {
+                if ($username) $user->username = $username;
+                if ($request->filled('password')) $user->password = \Illuminate\Support\Facades\Hash::make($request->password);
+                $user->save();
+            }
+        }
+    }
+
+    return response()->json(['success' => true, 'data' => $ins->load('user')]);
+});
+Route::delete('/instruktur/{id}', function (string $id) {
+    $ins = \App\Models\Instruktur::find($id);
+    if (!$ins) return response()->json(['success' => false, 'message' => 'Instruktur tidak ditemukan'], 404);
+    $userId = $ins->user_id;
+    $ins->delete();
+    // Hapus akun login yang dibuat otomatis agar tidak yatim
+    if ($userId) \App\Models\User::destroy($userId);
+    return response()->json(['success' => true]);
+});
+
 // Pendaftar
 Route::get('/pendaftar/me', function (\Illuminate\Http\Request $request) {
     $user = $request->user() ?? auth()->user();
     $pendaftar = null;
     if ($user) {
-        $pendaftar = \App\Models\Pendaftar::with(['program', 'angkatan', 'user', 'cicilan'])->where('user_id', $user->id)->first();
+        $pendaftar = \App\Models\Pendaftar::with(['program', 'angkatan', 'user', 'tagihan.pembayarans.paymentMethod'])->where('user_id', $user->id)->first();
     }
     if (!$pendaftar) {
-        $pendaftar = \App\Models\Pendaftar::with(['program', 'angkatan', 'user', 'cicilan'])->latest('tanggal_daftar')->first();
+        $pendaftar = \App\Models\Pendaftar::with(['program', 'angkatan', 'user', 'tagihan.pembayarans.paymentMethod'])->latest('tanggal_daftar')->first();
     }
     if (!$pendaftar) {
         return response()->json(['success' => false, 'message' => 'Peserta tidak ditemukan'], 404);
@@ -193,13 +309,14 @@ Route::get('/pendaftar/me/jadwal', function (\Illuminate\Http\Request $request) 
     if ($user) {
         $pendaftar = \App\Models\Pendaftar::where('user_id', $user->id)->first();
     }
-    if (!$pendaftar) {
-        $pendaftar = \App\Models\Pendaftar::latest('tanggal_daftar')->first();
-    }
+    // Tanpa pendaftar yang terautentikasi: kembalikan kosong (jangan fallback
+    // ke pendaftar lain agar peserta tidak melihat jadwal orang lain).
     if (!$pendaftar || $pendaftar->status !== 'diterima' || empty($pendaftar->angkatan_id)) {
         return response()->json(['success' => true, 'data' => []]);
     }
 
+    // Hanya sesi yang ditempati peserta (relasi pivot peserta_jadwals).
+    // Bila admin mengeluarkan peserta dari sesi, sesi itu ikut hilang di sini.
     $jadwal = $pendaftar->jadwal()
         ->where('jadwal_pelatihans.angkatan_id', $pendaftar->angkatan_id)
         ->with('angkatan')
@@ -255,11 +372,15 @@ Route::get('/pendaftar/{id}', [PendaftarController::class, 'show']);
 Route::post('/pendaftar', [PendaftarController::class, 'store']);
 Route::put('/pendaftar/{id}', [PendaftarController::class, 'update']);
 Route::patch('/pendaftar/{id}/status', [PendaftarController::class, 'updateStatus']);
+Route::patch('/pendaftar/{id}/status-akhir', [PendaftarController::class, 'updateStatusAkhir']);
+Route::patch('/pendaftar/{id}/validasi', [PendaftarController::class, 'validasi']);
+Route::patch('/pendaftar/{id}/verifikasi', [PendaftarController::class, 'verifikasi']);
 Route::patch('/pendaftar/{id}/angkatan', [PendaftarController::class, 'alokasiAngkatan']);
 Route::delete('/pendaftar/{id}', [PendaftarController::class, 'destroy']);
 
 // Jadwal Pelatihan
 Route::get('/jadwal', [JadwalPelatihanController::class, 'index']);
+Route::put('/jadwal-paket', [JadwalPelatihanController::class, 'updatePaket']);
 Route::get('/jadwal/{id}', [JadwalPelatihanController::class, 'show']);
 Route::post('/jadwal', [JadwalPelatihanController::class, 'store']);
 Route::put('/jadwal/{id}', [JadwalPelatihanController::class, 'update']);
@@ -272,11 +393,14 @@ Route::get('/soal', function (\Illuminate\Http\Request $request) {
     $query = \App\Models\SoalUjian::query();
     if ($request->filled('tipe')) $query->where('tipe', $request->tipe);
     if ($request->filled('program_id')) $query->where('program_id', $request->program_id);
+    if ($request->filled('is_active')) {
+        $query->where('is_active', filter_var($request->is_active, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE) ?? (bool) $request->is_active);
+    }
     return response()->json(['success' => true, 'data' => $query->get()]);
 });
 
 Route::get('/soal/random', function (\Illuminate\Http\Request $request) {
-    $query = \App\Models\SoalUjian::query();
+    $query = \App\Models\SoalUjian::query()->where('is_active', true);
     if ($request->filled('tipe')) $query->where('tipe', $request->tipe);
     if ($request->filled('program_id')) $query->where('program_id', $request->program_id);
     $jumlah = $request->input('jumlah', 20);
@@ -298,6 +422,7 @@ Route::post('/soal', function (\Illuminate\Http\Request $request) {
         'jawaban_benar'   => 'required|integer|min:0',
         'program_id'      => 'nullable|string',
         'gambar_soal'     => 'nullable|file|image|max:5120',
+        'is_active'       => 'nullable|boolean',
     ]);
 
     if ($request->hasFile('gambar_soal')) {
@@ -307,6 +432,12 @@ Route::post('/soal', function (\Illuminate\Http\Request $request) {
 
     if (is_string($data['opsi'] ?? null)) {
         $data['opsi'] = json_decode($data['opsi'], true);
+    }
+
+    if (!array_key_exists('is_active', $data)) {
+        $data['is_active'] = true;
+    } else {
+        $data['is_active'] = filter_var($data['is_active'], FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE) ?? (bool) $data['is_active'];
     }
 
     $soal = \App\Models\SoalUjian::create(array_merge($data, ['id' => \Illuminate\Support\Str::uuid()]));
@@ -325,6 +456,7 @@ Route::put('/soal/{id}', function (\Illuminate\Http\Request $request, string $id
         'jawaban_benar'   => 'sometimes|integer|min:0',
         'program_id'      => 'nullable|string',
         'gambar_soal'     => 'nullable|file|image|max:5120',
+        'is_active'       => 'nullable|boolean',
     ]);
 
     if ($request->hasFile('gambar_soal')) {
@@ -336,7 +468,23 @@ Route::put('/soal/{id}', function (\Illuminate\Http\Request $request, string $id
         $data['opsi'] = json_decode($data['opsi'], true);
     }
 
+    if (array_key_exists('is_active', $data)) {
+        $data['is_active'] = filter_var($data['is_active'], FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE) ?? (bool) $data['is_active'];
+    }
+
     $soal->update($data);
+    return response()->json(['success' => true, 'data' => $soal]);
+});
+
+Route::patch('/soal/{id}/status', function (\Illuminate\Http\Request $request, string $id) {
+    $soal = \App\Models\SoalUjian::find($id);
+    if (!$soal) return response()->json(['success' => false, 'message' => 'Soal tidak ditemukan'], 404);
+
+    $data = $request->validate([
+        'is_active' => 'required|boolean',
+    ]);
+
+    $soal->update(['is_active' => (bool) $data['is_active']]);
     return response()->json(['success' => true, 'data' => $soal]);
 });
 
@@ -347,9 +495,9 @@ Route::delete('/soal/{id}', function (string $id) {
     return response()->json(['success' => true, 'message' => 'Soal berhasil dihapus']);
 });
 
-// Ujian routes (peserta)
+// Ujian routes (peserta) — hanya soal aktif, urutan acak
 Route::get('/ujian/mulai', function (\Illuminate\Http\Request $request) {
-    $query = \App\Models\SoalUjian::query();
+    $query = \App\Models\SoalUjian::query()->where('is_active', true);
     if ($request->filled('tipe')) $query->where('tipe', $request->tipe);
     if ($request->filled('program_id')) {
         $progId = $request->program_id;
@@ -363,13 +511,13 @@ Route::get('/ujian/mulai', function (\Illuminate\Http\Request $request) {
     $jumlah = (int)$request->input('jumlah', 20);
     $soals = $query->inRandomOrder()->limit($jumlah)->get();
 
-    // Fallback: if no specific program soal found, return any soal with that tipe
+    // Fallback: if no specific program soal found, return any ACTIVE soal with that tipe
     if ($soals->isEmpty() && $request->filled('tipe')) {
-        $soals = \App\Models\SoalUjian::where('tipe', $request->tipe)->inRandomOrder()->limit($jumlah)->get();
+        $soals = \App\Models\SoalUjian::where('is_active', true)->where('tipe', $request->tipe)->inRandomOrder()->limit($jumlah)->get();
     }
-    // Fallback 2: if still empty, return any available soal
+    // Fallback 2: if still empty, return any ACTIVE soal
     if ($soals->isEmpty()) {
-        $soals = \App\Models\SoalUjian::inRandomOrder()->limit($jumlah)->get();
+        $soals = \App\Models\SoalUjian::where('is_active', true)->inRandomOrder()->limit($jumlah)->get();
     }
 
     return response()->json(['success' => true, 'data' => $soals]);
@@ -504,54 +652,6 @@ Route::patch('/pendaftar/{id}/pembayaran/tolak', [PembayaranController::class, '
 Route::patch('/pembayaran/{id}/verifikasi', [PembayaranController::class, 'verifyTransaction']);
 Route::patch('/pembayaran/{id}/tolak', [PembayaranController::class, 'rejectTransaction']);
 
-// Cicilan routes
-Route::get('/pendaftar/{id}/cicilan', [PendaftarController::class, 'getCicilan']);
-Route::post('/pendaftar/{id}/cicilan', [PendaftarController::class, 'createCicilan']);
-Route::patch('/cicilan/{id}/bayar', function (\Illuminate\Http\Request $request, string $id) {
-    $cicilan = \App\Models\Cicilan::find($id);
-    if (!$cicilan) return response()->json(['success' => false, 'message' => 'Cicilan tidak ditemukan'], 404);
-
-    if ($request->hasFile('bukti_pembayaran')) {
-        $path = $request->file('bukti_pembayaran')->store('bukti', 'public');
-        $cicilan->bukti_pembayaran = asset('storage/' . $path);
-    }
-    if ($request->filled('metode_pembayaran')) {
-        $cicilan->metode_pembayaran = $request->metode_pembayaran;
-    }
-    $cicilan->status = 'menunggu_konfirmasi';
-    $cicilan->tanggal_bayar = now();
-    $cicilan->save();
-
-    return response()->json(['success' => true, 'data' => $cicilan]);
-});
-
-Route::patch('/cicilan/{id}/verifikasi', function (string $id) {
-    $cicilan = \App\Models\Cicilan::find($id);
-    if (!$cicilan) return response()->json(['success' => false, 'message' => 'Cicilan tidak ditemukan'], 404);
-    $cicilan->update(['status' => 'lunas', 'tanggal_verifikasi' => now()]);
-
-    // Cek apakah semua cicilan lunas
-    $allCicilan = \App\Models\Cicilan::where('pendaftar_id', $cicilan->pendaftar_id)->get();
-    $semuaLunas = $allCicilan->every(fn($c) => $c->status === 'lunas');
-    if ($semuaLunas) {
-        \App\Models\Pendaftar::where('id', $cicilan->pendaftar_id)->update(['status_pembayaran' => 'lunas']);
-    } else {
-        \App\Models\Pendaftar::where('id', $cicilan->pendaftar_id)->update(['status_pembayaran' => 'cicilan_sebagian']);
-    }
-
-    return response()->json(['success' => true, 'message' => 'Cicilan diverifikasi']);
-});
-
-Route::patch('/cicilan/{id}/tolak', function (\Illuminate\Http\Request $request, string $id) {
-    $cicilan = \App\Models\Cicilan::find($id);
-    if (!$cicilan) return response()->json(['success' => false, 'message' => 'Cicilan tidak ditemukan'], 404);
-    $cicilan->update([
-        'status'        => 'ditolak',
-        'catatan_admin' => $request->input('catatan'),
-    ]);
-    return response()->json(['success' => true, 'message' => 'Cicilan ditolak']);
-});
-
 // Payment Methods
 Route::get('/payment-methods', function () {
     return response()->json(['success' => true, 'data' => \App\Models\PaymentMethod::orderBy('urutan')->get()]);
@@ -685,8 +785,10 @@ Route::post('/nilai/bulk', function (\Illuminate\Http\Request $request) {
 // ABSENSI — query peserta + nilai untuk cetak
 // =========================================================
 Route::get('/absensi', function (\Illuminate\Http\Request $request) {
+    // Peserta angkatan yang sudah lulus / sudah bekerja tetap tercatat
+    // sebagai anggota angkatan sehingga tetap muncul di rekap.
     $query = \App\Models\Pendaftar::with(['angkatan', 'program'])
-        ->where('status', 'diterima');
+        ->whereIn('status', ['diterima', 'lulus', 'sudah_bekerja']);
 
     if ($request->filled('angkatan_id')) $query->where('angkatan_id', $request->angkatan_id);
     if ($request->filled('program_id'))  $query->where('program_id', $request->program_id);
